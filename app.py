@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
-if not os.path.exists(DATA_FOLDER):
-    os.makedirs(DATA_FOLDER)
-
 # Config
 DATA_FOLDER = "data_daily_uploads"
 LATEST_FILE = os.path.join(DATA_FOLDER, "latest.xlsx")
+
+# Buat folder jika belum ada
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
 
 # Helper to load Excel
 @st.cache_data
