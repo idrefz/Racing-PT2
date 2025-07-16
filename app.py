@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
+
 # Config
 DATA_FOLDER = "data_daily_uploads"
 LATEST_FILE = os.path.join(DATA_FOLDER, "latest.xlsx")
@@ -113,6 +114,23 @@ if uploaded:
     )
 
     st.dataframe(pivot_table, use_container_width=True)
+
+    # Total Progress Hari Ini
+    st.subheader("\U0001F4C8 Total Progress Go Live (LoP)")
+    total_lop = df_filtered[df_filtered["Status Proyek"] == "Go Live"]["LoP"].sum()
+    st.metric("Total LoP Go Live Hari Ini", total_lop)
+
+    # Ranking
+    st.subheader("\U0001F3C6 Ranking Witel Berdasarkan LoP Go Live")
+    ranking_df = (
+        df_filtered[df_filtered["Status Proyek"] == "Go Live"]
+        .groupby("Witel")["LoP"]
+        .sum()
+        .reset_index()
+        .sort_values("LoP", ascending=False)
+    )
+    ranking_df["Rank"] = range(1, len(ranking_df) + 1)
+    st.dataframe(ranking_df[["Rank", "Witel", "LoP"]], use_container_width=True)
 
 else:
     st.info("Silakan upload file Excel untuk diproses.")
