@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime
 import plotly.express as px
 
 # Config
@@ -9,7 +8,7 @@ DATA_FOLDER = "data_daily_uploads"
 LATEST_FILE = os.path.join(DATA_FOLDER, "latest.xlsx")
 YESTERDAY_FILE = os.path.join(DATA_FOLDER, "yesterday.xlsx")
 
-# Buat folder jika belum ada
+# Create folder if not exists
 if not os.path.exists(DATA_FOLDER):
     os.makedirs(DATA_FOLDER)
 
@@ -18,7 +17,7 @@ if not os.path.exists(DATA_FOLDER):
 def load_excel(file):
     return pd.read_excel(file)
 
-# Helper: save as file
+# Helper: save file
 def save_file(path, uploaded_file):
     with open(path, "wb") as f:
         f.write(uploaded_file.getbuffer())
@@ -26,10 +25,12 @@ def save_file(path, uploaded_file):
 # Helper: compare two dataframes
 def compare_data(df_old, df_new):
     col_ticket = "Ticket ID"
-    col_status = "Status Alokasi Alpro"
+    col_status = "Status Proyek"  # Changed to track project status
+    col_port = "Total Port"
 
-    df_old = df_old[[col_ticket, col_status]].dropna()
-    df_new = df_new[[col_ticket, col_status]].dropna()
+    # Ensure we have the needed columns
+    df_old = df_old[[col_ticket, col_status, col_port]].dropna()
+    df_new = df_new[[col_ticket, col_status, col_port]].dropna()
 
     old_set = set(df_old[col_ticket])
     new_set = set(df_new[col_ticket])
@@ -42,6 +43,16 @@ def compare_data(df_old, df_new):
     df_new_common = df_new[df_new[col_ticket].isin(common)].set_index(col_ticket)
 
     status_diff = df_old_common.join(df_new_common, lsuffix="_H", rsuffix="_Hplus1")
+    
+    # Find tickets that changed to Go Live
+    changed_to_golive = status_diff[
+        (status_diff[f"{col_status}_H"] != "Go Live") & 
+        (status_diff[f"{col_status}_Hplus1"] == "Go Live")
+    ]
+    
+    # Calculate total port added from status changes
+    golive_port_added = changed_to_golive[f"{col_port}_Hplus1"].sum()
+
     changed_status = status_diff[status_diff[f"{col_status}_H"] != status_diff[f"{col_status}_Hplus1"]]
 
     return {
@@ -49,8 +60,9 @@ def compare_data(df_old, df_new):
         "total_new": len(df_new),
         "new_count": len(new_tickets),
         "removed_count": len(removed_tickets),
-        "changed_count": len(status_diff),
-        "changed_df": changed_status.reset_index()
+        "changed_count": len(changed_status),
+        "changed_df": changed_status.reset_index(),
+        "golive_port_added": golive_port_added
     }
 
 # UI Starts
@@ -75,6 +87,7 @@ if uploaded:
         df_old = load_excel(LATEST_FILE)
         if selected_regional != "All":
             df_old = df_old[df_old["Regional"] == selected_regional]
+        
         result = compare_data(df_old, df_new)
 
         st.subheader(":bar_chart: Ringkasan")
@@ -96,10 +109,10 @@ if uploaded:
     save_file(LATEST_FILE, uploaded)
     st.success("File berhasil disimpan sebagai referensi terbaru (H)")
 
-    # Pivot-style Table for Project Status - Updated to match your image
-    st.subheader("\U0001F4CA Rekapitulasi Deployment per Witel (Format Visual)")
+    # Pivot-style Table for Project Status
+    st.subheader("\U0001F4CA Rekapitulasi Deployment per Witel")
     
-    # Create the pivot table similar to your image
+    # Create pivot table
     pivot_table = pd.pivot_table(
         df_new,
         values=["LoP", "Total Port"],
@@ -111,12 +124,12 @@ if uploaded:
         margins_name="Grand Total"
     )
     
-    # Calculate additional columns like in your image
-    pivot_table['%'] = (pivot_table[('Total Port', 'Go Live')] / pivot_table[('Total Port', 'Grand Total')] * 100).round(0)
-    pivot_table['Penambahan GOLIVE H-1 vs HI'] = 0  # You would calculate this from your comparison logic
+    # Calculate additional metrics
+    pivot_table['%'] = (pivot_table[('Total Port', 'Go Live')] / 
+                        pivot_table[('Total Port', 'Grand Total')] * 100).round(0)
     pivot_table['RANK'] = pivot_table[('Total Port', 'Grand Total')].rank(ascending=False, method='min')
     
-    # Format the table for display
+    # Create display table
     display_table = pd.DataFrame({
         'Witel': pivot_table.index,
         'On Going_Lop': pivot_table[('LoP', 'On Going')],
@@ -126,19 +139,13 @@ if uploaded:
         'Total Lop': pivot_table[('LoP', 'Grand Total')],
         'Total Port': pivot_table[('Total Port', 'Grand Total')],
         '%': pivot_table['%'],
-        'Penambahan GOLIVE H-1 vs HI': pivot_table['Penambahan GOLIVE H-1 vs HI'],
+        'Penambahan GOLIVE H-1 vs HI': result['golive_port_added'] if os.path.exists(LATEST_FILE) else 0,
         'RANK': pivot_table['RANK']
     })
-    
-    # Style the table
-    def color_percent(val):
-        color = 'green' if val >= 95 else 'orange' if val >= 85 else 'red'
-        return f'color: {color}; font-weight: bold'
-    
-    styled_table = display_table.style \
-        .applymap(color_percent, subset=['%']) \
-        .background_gradient(subset=['Penambahan GOLIVE H-1 vs HI'], cmap='Blues') \
-        .format({
+
+    # Format the table display
+    st.dataframe(
+        display_table.style.format({
             '%': '{:.0f}%',
             'On Going_Lop': '{:.0f}',
             'On Going_Port': '{:.0f}',
@@ -148,11 +155,11 @@ if uploaded:
             'Total Port': '{:.0f}',
             'Penambahan GOLIVE H-1 vs HI': '{:.0f}',
             'RANK': '{:.0f}'
-        })
-    
-    st.dataframe(styled_table, use_container_width=True, height=(len(display_table) + 1) * 35 + 3)
-    
-    # Add visualizations
+        }),
+        use_container_width=True
+    )
+
+    # Visualizations
     st.subheader("\U0001F4C8 Visualisasi Data")
     
     col1, col2 = st.columns(2)
@@ -172,15 +179,16 @@ if uploaded:
     
     with col2:
         # Pie chart for Go Live vs On Going
-        grand_total = display_table[display_table['Witel'] == 'Grand Total'].iloc[0]
-        fig2 = px.pie(
-            values=[grand_total['On Going_Port'], grand_total['Go Live_Port']],
-            names=['On Going', 'Go Live'],
-            title='Distribusi Port (Grand Total)',
-            color=['On Going', 'Go Live'],
-            color_discrete_map={'On Going':'red', 'Go Live':'green'}
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+        if not display_table[display_table['Witel'] == 'Grand Total'].empty:
+            grand_total = display_table[display_table['Witel'] == 'Grand Total'].iloc[0]
+            fig2 = px.pie(
+                values=[grand_total['On Going_Port'], grand_total['Go Live_Port']],
+                names=['On Going', 'Go Live'],
+                title='Distribusi Port (Grand Total)',
+                color=['On Going', 'Go Live'],
+                color_discrete_map={'On Going':'red', 'Go Live':'green'}
+            )
+            st.plotly_chart(fig2, use_container_width=True)
 
 else:
     st.info("Silakan upload file Excel untuk diproses.")
