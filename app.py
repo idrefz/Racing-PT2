@@ -52,23 +52,6 @@ def compare_data(df_old, df_new):
         "changed_df": changed_status.reset_index()
     }
 
-# Style helpers
-def highlight_columns(val):
-    color = ""
-    if val.name.startswith("On Going"):
-        color = "background-color: #f28e2c"
-    elif val.name.startswith("Go Live"):
-        color = "background-color: #4caf50; color: white"
-    elif val.name.startswith("Total"):
-        color = "background-color: #1976d2; color: white"
-    elif val.name.startswith("%"):
-        color = "background-color: black; color: white"
-    elif val.name.startswith("Penambahan"):
-        color = "background-color: white"
-    elif val.name.startswith("RANK"):
-        color = "background-color: purple; color: white"
-    return [color] * len(val)
-
 # UI Starts
 st.set_page_config(page_title="Delta Ticket Harian", layout="wide")
 st.title("📊 Delta Ticket Harian (H vs H+1)")
@@ -112,32 +95,25 @@ if uploaded:
     save_file(LATEST_FILE, uploaded)
     st.success("File berhasil disimpan sebagai referensi terbaru (H)")
 
-    st.subheader("\U0001F4CA Tabel Komparasi Go Live Harian per Witel")
+    # Pivot-style Table for Project Status
+    st.subheader("\U0001F4CA Rekapitulasi Deployment per Witel")
 
-    if os.path.exists(YESTERDAY_FILE):
-        df_yest = load_excel(YESTERDAY_FILE)
-        df_yest["LoP"] = 1
-        df_yest["Total Port"] = pd.to_numeric(df_yest["Total Port"], errors="coerce")
+    df_filtered = df_new.copy()
+    df_filtered["LoP"] = 1
+    df_filtered["Total Port"] = pd.to_numeric(df_filtered["Total Port"], errors="coerce")
 
-        if selected_regional != "All":
-            df_yest = df_yest[df_yest["Regional"] == selected_regional]
+    pivot_table = pd.pivot_table(
+        df_filtered,
+        values=["LoP", "Total Port"],
+        index="Witel",
+        columns="Status Proyek",
+        aggfunc="sum",
+        fill_value=0,
+        margins=True,
+        margins_name="Total"
+    )
 
-        # Filter hanya Go Live
-        h_today = df_new[df_new["Status Proyek"] == "Go Live"].groupby("Witel").agg({"LoP": "sum", "Total Port": "sum"}).rename(columns={"LoP": "GoLive_LoP_H", "Total Port": "GoLive_Port_H"})
-        h_yest = df_yest[df_yest["Status Proyek"] == "Go Live"].groupby("Witel").agg({"LoP": "sum"}).rename(columns={"LoP": "GoLive_LoP_H-1"})
-
-        on_going = df_new[df_new["Status Proyek"] == "On Going"].groupby("Witel").agg({"LoP": "sum", "Total Port": "sum"}).rename(columns={"LoP": "OnGoing_LoP", "Total Port": "OnGoing_Port"})
-        total = df_new.groupby("Witel").agg({"LoP": "sum", "Total Port": "sum"}).rename(columns={"LoP": "Total_LoP", "Total Port": "Total_Port"})
-
-        summary = pd.concat([on_going, h_today, h_yest, total], axis=1).fillna(0)
-        summary["%"] = (summary["GoLive_Port_H"] / summary["Total_Port"] * 100).round(1).astype(str) + "%"
-        summary["Penambahan GoLive"] = summary["GoLive_LoP_H"] - summary["GoLive_LoP_H-1"]
-        summary["RANK"] = summary["Penambahan GoLive"].rank(ascending=False, method="min").astype(int)
-
-        styled = summary.style.apply(highlight_columns, axis=1)
-        st.dataframe(styled, use_container_width=True)
-    else:
-        st.info("Belum ada data H-1 untuk membandingkan progress harian.")
+    st.dataframe(pivot_table, use_container_width=True)
 
 else:
     st.info("Silakan upload file Excel untuk diproses.")
