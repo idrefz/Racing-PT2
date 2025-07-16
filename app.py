@@ -184,8 +184,8 @@ if uploaded:
     display_table.loc[display_table['Witel'] == 'Grand Total', 'RANK'] = None
 
     # Format the table display
-    st.dataframe(
-        display_table.style.format({
+st.dataframe(
+    datel_table.style.format({
             '%': '{:.0f}%',
             'On Going_Lop': '{:.0f}',
             'On Going_Port': '{:.0f}',
@@ -260,7 +260,7 @@ if uploaded:
     use_container_width=True,
     hide_index=True
 )
- st.dataframe(
+st.dataframe(
     datel_table,
     column_config={
         'Datel': 'Datel',
