@@ -48,7 +48,7 @@ def compare_data(df_old, df_new):
         "total_new": len(df_new),
         "new_count": len(new_tickets),
         "removed_count": len(removed_tickets),
-        "changed_count": len(changed_status),
+        "changed_count": len(status_diff),
         "changed_df": changed_status.reset_index()
     }
 
@@ -80,8 +80,17 @@ if uploaded:
     df_new["LoP"] = 1
     df_new["Total Port"] = pd.to_numeric(df_new["Total Port"], errors="coerce")
 
+    # Regional filter
+    regional_list = df_new['Regional'].dropna().unique().tolist()
+    selected_regional = st.selectbox("Pilih Regional", ["All"] + sorted(regional_list))
+
+    if selected_regional != "All":
+        df_new = df_new[df_new["Regional"] == selected_regional]
+
     if os.path.exists(LATEST_FILE):
         df_old = load_excel(LATEST_FILE)
+        if selected_regional != "All":
+            df_old = df_old[df_old["Regional"] == selected_regional]
         result = compare_data(df_old, df_new)
 
         st.subheader(":bar_chart: Ringkasan")
@@ -104,11 +113,14 @@ if uploaded:
     st.success("File berhasil disimpan sebagai referensi terbaru (H)")
 
     st.subheader("\U0001F4CA Tabel Komparasi Go Live Harian per Witel")
-    
+
     if os.path.exists(YESTERDAY_FILE):
         df_yest = load_excel(YESTERDAY_FILE)
         df_yest["LoP"] = 1
         df_yest["Total Port"] = pd.to_numeric(df_yest["Total Port"], errors="coerce")
+
+        if selected_regional != "All":
+            df_yest = df_yest[df_yest["Regional"] == selected_regional]
 
         # Filter hanya Go Live
         h_today = df_new[df_new["Status Proyek"] == "Go Live"].groupby("Witel").agg({"LoP": "sum", "Total Port": "sum"}).rename(columns={"LoP": "GoLive_LoP_H", "Total Port": "GoLive_Port_H"})
