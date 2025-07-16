@@ -22,15 +22,19 @@ def save_file(path, uploaded_file):
     with open(path, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
-# Helper: compare two dataframes
+# Helper: compare two dataframes with additional columns
 def compare_data(df_old, df_new):
     col_ticket = "Ticket ID"
     col_status = "Status Proyek"
     col_port = "Total Port"
+    col_witel = "Witel"
+    col_datel = "Datel"
+    col_project = "Nama Proyek"
 
     # Ensure we have the needed columns
-    df_old = df_old[[col_ticket, col_status, col_port]].dropna()
-    df_new = df_new[[col_ticket, col_status, col_port]].dropna()
+    required_cols = [col_ticket, col_status, col_port, col_witel, col_datel, col_project]
+    df_old = df_old[required_cols].dropna(subset=[col_ticket, col_status, col_port])
+    df_new = df_new[required_cols].dropna(subset=[col_ticket, col_status, col_port])
 
     old_set = set(df_old[col_ticket])
     new_set = set(df_new[col_ticket])
@@ -50,10 +54,28 @@ def compare_data(df_old, df_new):
         (status_diff[f"{col_status}_Hplus1"] == "Go Live")
     ]
     
-    # Calculate total port added from status changes
-    golive_port_added = changed_to_golive[f"{col_port}_Hplus1"].sum()
+    # Calculate total port added per Witel
+    golive_port_by_witel = changed_to_golive.groupby(f"{col_witel}_Hplus1")[f"{col_port}_Hplus1"].sum()
+    total_golive_port_added = golive_port_by_witel.sum()
 
+    # Prepare detailed changes
     changed_status = status_diff[status_diff[f"{col_status}_H"] != status_diff[f"{col_status}_Hplus1"]]
+    detailed_changes = changed_status.reset_index()[[
+        f"{col_ticket}", 
+        f"{col_witel}_Hplus1",
+        f"{col_datel}_Hplus1",
+        f"{col_project}_Hplus1",
+        f"{col_status}_H", 
+        f"{col_port}_H",
+        f"{col_status}_Hplus1"
+    ]].rename(columns={
+        f"{col_witel}_Hplus1": "Witel",
+        f"{col_datel}_Hplus1": "Datel",
+        f"{col_project}_Hplus1": "Nama Proyek",
+        f"{col_status}_H": "Status Proyek H",
+        f"{col_port}_H": "Total Port H",
+        f"{col_status}_Hplus1": "Status Proyek H+1"
+    })
 
     return {
         "total_old": len(df_old),
@@ -61,8 +83,9 @@ def compare_data(df_old, df_new):
         "new_count": len(new_tickets),
         "removed_count": len(removed_tickets),
         "changed_count": len(changed_status),
-        "changed_df": changed_status.reset_index(),
-        "golive_port_added": golive_port_added
+        "changed_df": detailed_changes,
+        "golive_port_by_witel": golive_port_by_witel,
+        "total_golive_port_added": total_golive_port_added
     }
 
 # UI Starts
@@ -99,7 +122,9 @@ if uploaded:
         col5.metric("Status Berubah", result['changed_count'])
 
         st.subheader(":pencil: Detail Perubahan Status")
-        st.dataframe(result['changed_df'], use_container_width=True)
+        st.dataframe(result['changed_df'][[
+            "Witel", "Datel", "Nama Proyek", "Status Proyek H", "Total Port H"
+        ]], use_container_width=True)
     else:
         st.warning("Tidak ditemukan data sebelumnya. Ini akan jadi referensi awal (H).")
 
@@ -133,6 +158,12 @@ if uploaded:
     ranks = witel_only[('Total Port', 'Grand Total')].rank(ascending=False, method='min')
     pivot_table['RANK'] = pivot_table.index.map(ranks)
     
+    # Add GOLIVE H-1 vs HI per Witel
+    golive_port_added = result.get('golive_port_by_witel', pd.Series())
+    pivot_table['Penambahan GOLIVE'] = pivot_table.index.map(
+        lambda x: golive_port_added.get(x, 0) if not golive_port_added.empty else 0
+    )
+
     # Create display table
     display_table = pd.DataFrame({
         'Witel': pivot_table.index,
@@ -143,7 +174,7 @@ if uploaded:
         'Total Lop': pivot_table[('LoP', 'Grand Total')],
         'Total Port': pivot_table[('Total Port', 'Grand Total')],
         '%': pivot_table['%'],
-        'Penambahan GOLIVE H-1 vs HI': result['golive_port_added'] if os.path.exists(LATEST_FILE) else 0,
+        'Penambahan GOLIVE H-1 vs HI': pivot_table['Penambahan GOLIVE'],
         'RANK': pivot_table['RANK']
     })
 
@@ -162,7 +193,8 @@ if uploaded:
             'Total Port': '{:.0f}',
             'Penambahan GOLIVE H-1 vs HI': '{:.0f}',
             'RANK': '{:.0f}' if pd.notna(display_table['RANK']).any() else ''
-        }),
+        }).applymap(lambda x: 'font-weight: bold' if x == display_table['Penambahan GOLIVE H-1 vs HI'].max() and x != 0 else '', 
+                  subset=['Penambahan GOLIVE H-1 vs HI']),
         use_container_width=True
     )
 
@@ -186,16 +218,19 @@ if uploaded:
         st.plotly_chart(fig1, use_container_width=True)
     
     with col2:
-        # Pie chart for Go Live vs On Going
-        if not display_table[display_table['Witel'] == 'Grand Total'].empty:
-            grand_total = display_table[display_table['Witel'] == 'Grand Total'].iloc[0]
-            fig2 = px.pie(
-                values=[grand_total['On Going_Port'], grand_total['Go Live_Port']],
-                names=['On Going', 'Go Live'],
-                title='Distribusi Port (Grand Total)',
-                color=['On Going', 'Go Live'],
-                color_discrete_map={'On Going':'red', 'Go Live':'green'}
+        # Bar chart for Penambahan GOLIVE
+        plot_df = display_table[display_table['Witel'] != 'Grand Total']
+        plot_df = plot_df[plot_df['Penambahan GOLIVE H-1 vs HI'] > 0]
+        if not plot_df.empty:
+            fig2 = px.bar(
+                plot_df,
+                x='Witel',
+                y='Penambahan GOLIVE H-1 vs HI',
+                color='Witel',
+                title='Penambahan GOLIVE H-1 vs HI per Witel',
+                text='Penambahan GOLIVE H-1 vs HI'
             )
+            fig2.update_traces(texttemplate='%{text:,}', textposition='outside')
             st.plotly_chart(fig2, use_container_width=True)
 
 else:
