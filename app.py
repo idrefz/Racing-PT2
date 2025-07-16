@@ -24,7 +24,7 @@ def save_file(path, uploaded_file):
 
 # Helper: compare two dataframes
 def compare_data(df_old, df_new):
-    col_ticket = "Ticket ID"
+    col_ticket = "Datel"
     col_status = "Status Proyek"
     col_port = "Total Port"
 
