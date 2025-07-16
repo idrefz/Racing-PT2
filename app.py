@@ -184,8 +184,8 @@ if uploaded:
     display_table.loc[display_table['Witel'] == 'Grand Total', 'RANK'] = None
 
     # Format the table display
-st.dataframe(
-    datel_table.style.format({
+    st.dataframe(
+        display_table.style.format({
             '%': '{:.0f}%',
             'On Going_Lop': '{:.0f}',
             'On Going_Port': '{:.0f}',
@@ -194,9 +194,8 @@ st.dataframe(
             'Total Lop': '{:.0f}',
             'Total Port': '{:.0f}',
             'Penambahan GOLIVE H-1 vs HI': '{:.0f}',
-            'RANK': '{:.0f}' if pd.notna(display_table['RANK']).any() else ''
-        }).applymap(lambda x: 'font-weight: bold' if x == display_table['Penambahan GOLIVE H-1 vs HI'].max() and x != 0 else '', 
-                  subset=['Penambahan GOLIVE H-1 vs HI']),
+            'RANK': '{:.0f}'
+        }),
         use_container_width=True
     )
 
@@ -244,69 +243,24 @@ st.dataframe(
 
     datel_table = pd.concat([datel_table, grand_total], ignore_index=True)
 
-    # Format and display the table
-    styled_datel_table = datel_table.style \
-        .format({
-        'On_Going_LOP': '{:.0f}',
-        'On_Going_Port': '{:.0f}',
-        'Go_Live_LOP': '{:.0f}',
-        'Go_Live_Port': '{:.0f}',
-        'Total LOP': '{:.0f}',
-        'Total Port': '{:.0f}',
-        '%': '{:.0f}%',
-        'Penambahan': '{:.0f}',
-        'RANK': '{:.0f}'
-    }),
-    use_container_width=True,
-    hide_index=True
-)
-st.dataframe(
-    datel_table,
-    column_config={
-        'Datel': 'Datel',
-        'On_Going_LOP': st.column_config.NumberColumn('On Going LOP', format="%d"),
-        'On_Going_Port': st.column_config.NumberColumn('Port', format="%d"),
-        'Go_Live_LOP': st.column_config.NumberColumn('Go Live LOP', format="%d"),
-        'Go_Live_Port': st.column_config.NumberColumn('Port', format="%d"),
-        'Total LOP': st.column_config.NumberColumn('Total LOP', format="%d"),
-        'Total Port': st.column_config.NumberColumn('Total Port', format="%d"),
-        '%': st.column_config.NumberColumn('%', format="%d%%"),
-        'Penambahan': st.column_config.NumberColumn('Penambahan GOLIVE H-1 vs HI', format="%d"),
-        'RANK': st.column_config.NumberColumn('RANK', format="%d")
-    },
-    use_container_width=True,
-    hide_index=True
-)
+    # Display the table
+    st.dataframe(
+        datel_table.style.format({
+            'On_Going_LOP': '{:.0f}',
+            'On_Going_Port': '{:.0f}',
+            'Go_Live_LOP': '{:.0f}',
+            'Go_Live_Port': '{:.0f}',
+            'Total LOP': '{:.0f}',
+            'Total Port': '{:.0f}',
+            '%': '{:.0f}%',
+            'Penambahan': '{:.0f}',
+            'RANK': '{:.0f}'
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
 
-    # Add visualizations for Datel breakdown
-    col1, col2 = st.columns(2)
-    with col1:
-        fig_datel_port = px.bar(
-            datel_table[datel_table['Datel'] != 'GRAND TOTAL'],
-            x='Datel',
-            y='Total Port',
-            color='Datel',
-            title='Total Port per Datel',
-            text='Total Port'
-        )
-        fig_datel_port.update_traces(texttemplate='%{text:,}', textposition='outside')
-        st.plotly_chart(fig_datel_port, use_container_width=True)
-
-    with col2:
-        plot_df = datel_table[(datel_table['Datel'] != 'GRAND TOTAL') & (datel_table['Penambahan'] > 0)]
-        if not plot_df.empty:
-            fig_datel_golive = px.bar(
-                plot_df,
-                x='Datel',
-                y='Penambahan',
-                color='Datel',
-                title='Penambahan GOLIVE per Datel',
-                text='Penambahan'
-            )
-            fig_datel_golive.update_traces(texttemplate='%{text:,}', textposition='outside')
-            st.plotly_chart(fig_datel_golive, use_container_width=True)
-
-    # Visualizations for Witel data
+    # Visualizations
     st.subheader("\U0001F4C8 Visualisasi Data")
     
     col1, col2 = st.columns(2)
