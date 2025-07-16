@@ -6,6 +6,7 @@ from datetime import datetime
 # Config
 DATA_FOLDER = "data_daily_uploads"
 LATEST_FILE = os.path.join(DATA_FOLDER, "latest.xlsx")
+YESTERDAY_FILE = os.path.join(DATA_FOLDER, "yesterday.xlsx")
 
 # Buat folder jika belum ada
 if not os.path.exists(DATA_FOLDER):
@@ -16,9 +17,9 @@ if not os.path.exists(DATA_FOLDER):
 def load_excel(file):
     return pd.read_excel(file)
 
-# Helper: save as latest
-def save_latest_file(uploaded_file):
-    with open(LATEST_FILE, "wb") as f:
+# Helper: save as file
+def save_file(path, uploaded_file):
+    with open(path, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
 # Helper: compare two dataframes
@@ -51,6 +52,23 @@ def compare_data(df_old, df_new):
         "changed_df": changed_status.reset_index()
     }
 
+# Style helpers
+def highlight_columns(val):
+    color = ""
+    if val.name.startswith("On Going"):
+        color = "background-color: #f28e2c"
+    elif val.name.startswith("Go Live"):
+        color = "background-color: #4caf50; color: white"
+    elif val.name.startswith("Total"):
+        color = "background-color: #1976d2; color: white"
+    elif val.name.startswith("%"):
+        color = "background-color: black; color: white"
+    elif val.name.startswith("Penambahan"):
+        color = "background-color: white"
+    elif val.name.startswith("RANK"):
+        color = "background-color: purple; color: white"
+    return [color] * len(val)
+
 # UI Starts
 st.set_page_config(page_title="Delta Ticket Harian", layout="wide")
 st.title("📊 Delta Ticket Harian (H vs H+1)")
@@ -58,15 +76,14 @@ st.title("📊 Delta Ticket Harian (H vs H+1)")
 uploaded = st.file_uploader("Upload file hari ini (H+1)", type="xlsx")
 
 if uploaded:
-    # Read current
     df_new = load_excel(uploaded)
+    df_new["LoP"] = 1
+    df_new["Total Port"] = pd.to_numeric(df_new["Total Port"], errors="coerce")
 
-    # Load latest (H)
     if os.path.exists(LATEST_FILE):
         df_old = load_excel(LATEST_FILE)
         result = compare_data(df_old, df_new)
 
-        # KPI Summary
         st.subheader(":bar_chart: Ringkasan")
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Total H", result['total_old'])
@@ -75,62 +92,40 @@ if uploaded:
         col4.metric("Ticket Hilang", result['removed_count'])
         col5.metric("Status Berubah", result['changed_count'])
 
-        # Detail Table
         st.subheader(":pencil: Detail Perubahan Status")
         st.dataframe(result['changed_df'], use_container_width=True)
-
     else:
         st.warning("Tidak ditemukan data sebelumnya. Ini akan jadi referensi awal (H).")
 
-    # Save as latest
-    save_latest_file(uploaded)
+    # Save backup kemarin
+    if os.path.exists(LATEST_FILE):
+        os.replace(LATEST_FILE, YESTERDAY_FILE)
+    save_file(LATEST_FILE, uploaded)
     st.success("File berhasil disimpan sebagai referensi terbaru (H)")
 
-    # Pivot-style Table for Project Status
-    st.subheader("\U0001F4CA Pivot Tabel Status Proyek")
+    st.subheader("\U0001F4CA Tabel Komparasi Go Live Harian per Witel")
     
-    # Filter Regional
-    regional_list = df_new['Regional'].dropna().unique().tolist()
-    selected_regional = st.selectbox("Pilih Regional", ["All"] + regional_list)
+    if os.path.exists(YESTERDAY_FILE):
+        df_yest = load_excel(YESTERDAY_FILE)
+        df_yest["LoP"] = 1
+        df_yest["Total Port"] = pd.to_numeric(df_yest["Total Port"], errors="coerce")
 
-    if selected_regional != "All":
-        df_filtered = df_new[df_new["Regional"] == selected_regional]
+        # Filter hanya Go Live
+        h_today = df_new[df_new["Status Proyek"] == "Go Live"].groupby("Witel").agg({"LoP": "sum", "Total Port": "sum"}).rename(columns={"LoP": "GoLive_LoP_H", "Total Port": "GoLive_Port_H"})
+        h_yest = df_yest[df_yest["Status Proyek"] == "Go Live"].groupby("Witel").agg({"LoP": "sum"}).rename(columns={"LoP": "GoLive_LoP_H-1"})
+
+        on_going = df_new[df_new["Status Proyek"] == "On Going"].groupby("Witel").agg({"LoP": "sum", "Total Port": "sum"}).rename(columns={"LoP": "OnGoing_LoP", "Total Port": "OnGoing_Port"})
+        total = df_new.groupby("Witel").agg({"LoP": "sum", "Total Port": "sum"}).rename(columns={"LoP": "Total_LoP", "Total Port": "Total_Port"})
+
+        summary = pd.concat([on_going, h_today, h_yest, total], axis=1).fillna(0)
+        summary["%"] = (summary["GoLive_Port_H"] / summary["Total_Port"] * 100).round(1).astype(str) + "%"
+        summary["Penambahan GoLive"] = summary["GoLive_LoP_H"] - summary["GoLive_LoP_H-1"]
+        summary["RANK"] = summary["Penambahan GoLive"].rank(ascending=False, method="min").astype(int)
+
+        styled = summary.style.apply(highlight_columns, axis=1)
+        st.dataframe(styled, use_container_width=True)
     else:
-        df_filtered = df_new.copy()
-
-    # Hitung nilai LoP = jumlah baris
-    df_filtered["LoP"] = 1
-    df_filtered["Total Port"] = pd.to_numeric(df_filtered["Total Port"], errors="coerce")
-
-    pivot_table = pd.pivot_table(
-        df_filtered,
-        values=["LoP", "Total Port"],
-        index="Witel",
-        columns="Status Proyek",
-        aggfunc="sum",
-        fill_value=0,
-        margins=True,
-        margins_name="Total"
-    )
-
-    st.dataframe(pivot_table, use_container_width=True)
-
-    # Total Progress Hari Ini
-    st.subheader("\U0001F4C8 Total Progress Go Live (LoP)")
-    total_lop = df_filtered[df_filtered["Status Proyek"] == "Go Live"]["LoP"].sum()
-    st.metric("Total LoP Go Live Hari Ini", total_lop)
-
-    # Ranking
-    st.subheader("\U0001F3C6 Ranking Witel Berdasarkan LoP Go Live")
-    ranking_df = (
-        df_filtered[df_filtered["Status Proyek"] == "Go Live"]
-        .groupby("Witel")["LoP"]
-        .sum()
-        .reset_index()
-        .sort_values("LoP", ascending=False)
-    )
-    ranking_df["Rank"] = range(1, len(ranking_df) + 1)
-    st.dataframe(ranking_df[["Rank", "Witel", "LoP"]], use_container_width=True)
+        st.info("Belum ada data H-1 untuk membandingkan progress harian.")
 
 else:
     st.info("Silakan upload file Excel untuk diproses.")
