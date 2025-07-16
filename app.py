@@ -25,7 +25,7 @@ def save_file(path, uploaded_file):
 # Helper: compare two dataframes
 def compare_data(df_old, df_new):
     col_ticket = "Ticket ID"
-    col_status = "Status Proyek"  # Changed to track project status
+    col_status = "Status Proyek"
     col_port = "Total Port"
 
     # Ensure we have the needed columns
@@ -127,7 +127,11 @@ if uploaded:
     # Calculate additional metrics
     pivot_table['%'] = (pivot_table[('Total Port', 'Go Live')] / 
                         pivot_table[('Total Port', 'Grand Total')] * 100).round(0)
-    pivot_table['RANK'] = pivot_table[('Total Port', 'Grand Total')].rank(ascending=False, method='min')
+    
+    # Calculate ranking EXCLUDING Grand Total
+    witel_only = pivot_table[pivot_table.index != "Grand Total"]
+    ranks = witel_only[('Total Port', 'Grand Total')].rank(ascending=False, method='min')
+    pivot_table['RANK'] = pivot_table.index.map(ranks)
     
     # Create display table
     display_table = pd.DataFrame({
@@ -143,6 +147,9 @@ if uploaded:
         'RANK': pivot_table['RANK']
     })
 
+    # Explicitly set Grand Total rank to empty
+    display_table.loc[display_table['Witel'] == 'Grand Total', 'RANK'] = None
+
     # Format the table display
     st.dataframe(
         display_table.style.format({
@@ -154,7 +161,7 @@ if uploaded:
             'Total Lop': '{:.0f}',
             'Total Port': '{:.0f}',
             'Penambahan GOLIVE H-1 vs HI': '{:.0f}',
-            'RANK': '{:.0f}'
+            'RANK': '{:.0f}' if pd.notna(display_table['RANK']).any() else ''
         }),
         use_container_width=True
     )
@@ -165,9 +172,10 @@ if uploaded:
     col1, col2 = st.columns(2)
     
     with col1:
-        # Bar chart for Total Port by Witel
+        # Bar chart for Total Port by Witel (excluding Grand Total)
+        plot_df = display_table[display_table['Witel'] != 'Grand Total'].sort_values('Total Port', ascending=False)
         fig1 = px.bar(
-            display_table[display_table['Witel'] != 'Grand Total'].sort_values('Total Port', ascending=False),
+            plot_df,
             x='Witel',
             y='Total Port',
             color='Witel',
