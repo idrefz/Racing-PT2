@@ -247,36 +247,36 @@ if uploaded:
     # Format and display the table
     styled_datel_table = datel_table.style \
         .format({
-            'On_Going_LOP': '{:.0f}',
-            'On_Going_Port': '{:.0f}',
-            'Go_Live_LOP': '{:.0f}',
-            'Go_Live_Port': '{:.0f}',
-            'Total LOP': '{:.0f}',
-            'Total Port': '{:.0f}',
-            '%': '{:.0f}%',
-            'Penambahan': '{:.0f}',
-            'RANK': '{:.0f}' if pd.notna(datel_table['RANK']).any() else ''
-        }) \
-        .apply(lambda x: ['font-weight: bold' if x['Datel'] == 'GRAND TOTAL' else '' for _, x in datel_table.iterrows()], axis=1) \
-        .applymap(lambda x: 'color: green' if isinstance(x, str) and '%' in x and float(x.replace('%','')) >= 95 else '', subset=['%'])
-
-    st.dataframe(
-        styled_datel_table,
-        column_config={
-            'Datel': 'Datel',
-            'On_Going_LOP': st.column_config.NumberColumn('On Going LOP'),
-            'On_Going_Port': st.column_config.NumberColumn('Port'),
-            'Go_Live_LOP': st.column_config.NumberColumn('Go Live LOP'),
-            'Go_Live_Port': st.column_config.NumberColumn('Port'),
-            'Total LOP': st.column_config.NumberColumn('Total LOP'),
-            'Total Port': st.column_config.NumberColumn('Total Port'),
-            '%': st.column_config.NumberColumn('%'),
-            'Penambahan': st.column_config.NumberColumn('Penambahan GOLIVE H-1 vs HI'),
-            'RANK': st.column_config.NumberColumn('RANK')
-        },
-        use_container_width=True,
-        hide_index=True
-    )
+        'On_Going_LOP': '{:.0f}',
+        'On_Going_Port': '{:.0f}',
+        'Go_Live_LOP': '{:.0f}',
+        'Go_Live_Port': '{:.0f}',
+        'Total LOP': '{:.0f}',
+        'Total Port': '{:.0f}',
+        '%': '{:.0f}%',
+        'Penambahan': '{:.0f}',
+        'RANK': '{:.0f}'
+    }),
+    use_container_width=True,
+    hide_index=True
+)
+ st.dataframe(
+    datel_table,
+    column_config={
+        'Datel': 'Datel',
+        'On_Going_LOP': st.column_config.NumberColumn('On Going LOP', format="%d"),
+        'On_Going_Port': st.column_config.NumberColumn('Port', format="%d"),
+        'Go_Live_LOP': st.column_config.NumberColumn('Go Live LOP', format="%d"),
+        'Go_Live_Port': st.column_config.NumberColumn('Port', format="%d"),
+        'Total LOP': st.column_config.NumberColumn('Total LOP', format="%d"),
+        'Total Port': st.column_config.NumberColumn('Total Port', format="%d"),
+        '%': st.column_config.NumberColumn('%', format="%d%%"),
+        'Penambahan': st.column_config.NumberColumn('Penambahan GOLIVE H-1 vs HI', format="%d"),
+        'RANK': st.column_config.NumberColumn('RANK', format="%d")
+    },
+    use_container_width=True,
+    hide_index=True
+)
 
     # Add visualizations for Datel breakdown
     col1, col2 = st.columns(2)
