@@ -232,6 +232,114 @@ if uploaded:
             )
             fig2.update_traces(texttemplate='%{text:,}', textposition='outside')
             st.plotly_chart(fig2, use_container_width=True)
+# Add this after your pivot table creation in the existing code
 
+# Breakdown by Datel
+st.subheader("📊 Breakdown per Datel")
+
+# Group by Datel and calculate metrics
+datel_table = df_new.groupby('Datel').agg(
+    On_Going_LOP=('LoP', lambda x: x[df_new['Status Proyek'] == 'On Going'].sum()),
+    On_Going_Port=('Total Port', lambda x: x[df_new['Status Proyek'] == 'On Going'].sum()),
+    Go_Live_LOP=('LoP', lambda x: x[df_new['Status Proyek'] == 'Go Live'].sum()),
+    Go_Live_Port=('Total Port', lambda x: x[df_new['Status Proyek'] == 'Go Live'].sum())
+).reset_index()
+
+# Calculate totals and percentages
+datel_table['Total LOP'] = datel_table['On_Going_LOP'] + datel_table['Go_Live_LOP']
+datel_table['Total Port'] = datel_table['On_Going_Port'] + datel_table['Go_Live_Port']
+datel_table['%'] = (datel_table['Go_Live_Port'] / datel_table['Total Port'] * 100).round(0)
+
+# Calculate GOLIVE additions per Datel (from comparison data)
+if os.path.exists(LATEST_FILE):
+    datel_golive = result['changed_df'][
+        (result['changed_df']['Status Proyek H'] != 'Go Live') & 
+        (result['changed_df']['Status Proyek H+1'] == 'Go Live')
+    ].groupby('Datel')['Total Port H+1'].sum().reset_index(name='Penambahan')
+    
+    datel_table = pd.merge(datel_table, datel_golive, on='Datel', how='left')
+    datel_table['Penambahan'] = datel_table['Penambahan'].fillna(0)
+else:
+    datel_table['Penambahan'] = 0
+
+# Calculate ranking
+datel_table['RANK'] = datel_table['Total Port'].rank(ascending=False, method='min')
+
+# Add Grand Total row
+grand_total = pd.DataFrame({
+    'Datel': ['GRAND TOTAL'],
+    'On_Going_LOP': [datel_table['On_Going_LOP'].sum()],
+    'On_Going_Port': [datel_table['On_Going_Port'].sum()],
+    'Go_Live_LOP': [datel_table['Go_Live_LOP'].sum()],
+    'Go_Live_Port': [datel_table['Go_Live_Port'].sum()],
+    'Total LOP': [datel_table['Total LOP'].sum()],
+    'Total Port': [datel_table['Total Port'].sum()],
+    '%': [(datel_table['Go_Live_Port'].sum() / datel_table['Total Port'].sum() * 100).round(0)],
+    'Penambahan': [datel_table['Penambahan'].sum()],
+    'RANK': [None]
+})
+
+datel_table = pd.concat([datel_table, grand_total], ignore_index=True)
+
+# Format and display the table
+styled_datel_table = datel_table.style \
+    .format({
+        'On_Going_LOP': '{:.0f}',
+        'On_Going_Port': '{:.0f}',
+        'Go_Live_LOP': '{:.0f}',
+        'Go_Live_Port': '{:.0f}',
+        'Total LOP': '{:.0f}',
+        'Total Port': '{:.0f}',
+        '%': '{:.0f}%',
+        'Penambahan': '{:.0f}',
+        'RANK': '{:.0f}' if pd.notna(datel_table['RANK']).any() else ''
+    }) \
+    .apply(lambda x: ['font-weight: bold' if x['Datel'] == 'GRAND TOTAL' else '' for _, x in datel_table.iterrows()], axis=1) \
+    .applymap(lambda x: 'color: green' if isinstance(x, str) and '%' in x and float(x.replace('%','')) >= 95 else '', subset=['%'])
+
+st.dataframe(
+    styled_datel_table,
+    column_config={
+        'Datel': 'Datel',
+        'On_Going_LOP': st.column_config.NumberColumn('On Going LOP'),
+        'On_Going_Port': st.column_config.NumberColumn('Port'),
+        'Go_Live_LOP': st.column_config.NumberColumn('Go Live LOP'),
+        'Go_Live_Port': st.column_config.NumberColumn('Port'),
+        'Total LOP': st.column_config.NumberColumn('Total LOP'),
+        'Total Port': st.column_config.NumberColumn('Total Port'),
+        '%': st.column_config.NumberColumn('%'),
+        'Penambahan': st.column_config.NumberColumn('Penambahan GOLIVE H-1 vs HI'),
+        'RANK': st.column_config.NumberColumn('RANK')
+    },
+    use_container_width=True,
+    hide_index=True
+)
+
+# Add visualizations for Datel breakdown
+col1, col2 = st.columns(2)
+with col1:
+    fig_datel_port = px.bar(
+        datel_table[datel_table['Datel'] != 'GRAND TOTAL'],
+        x='Datel',
+        y='Total Port',
+        color='Datel',
+        title='Total Port per Datel',
+        text='Total Port'
+    )
+    fig_datel_port.update_traces(texttemplate='%{text:,}', textposition='outside')
+    st.plotly_chart(fig_datel_port, use_container_width=True)
+
+with col2:
+    fig_datel_golive = px.bar(
+        datel_table[(datel_table['Datel'] != 'GRAND TOTAL') & (datel_table['Penambahan'] > 0)],
+        x='Datel',
+        y='Penambahan',
+        color='Datel',
+        title='Penambahan GOLIVE per Datel',
+        text='Penambahan'
+    )
+    if not datel_table[(datel_table['Datel'] != 'GRAND TOTAL') & (datel_table['Penambahan'] > 0)].empty:
+        fig_datel_golive.update_traces(texttemplate='%{text:,}', textposition='outside')
+        st.plotly_chart(fig_datel_golive, use_container_width=True)
 else:
     st.info("Silakan upload file Excel untuk diproses.")
