@@ -212,7 +212,7 @@ if view_mode == "Dashboard":
             witel_display_df = pd.DataFrame(witel_display_data)
             
             # Display WITEL summary with whole numbers
-            st.subheader("📊 Rekapitulasi per WITEL")
+            st.subheader("📊 Rekapitulasi Racing PT2 per WITEL")
             st.dataframe(
                 witel_display_df.style.format({
                     '%': '{:.0f}%',
