@@ -181,7 +181,7 @@ if page=="Dashboard":
                 '%':'{:.1f}%',
                 'RANK':'{:,.0f}'
             }).applymap(lambda v:'background-color:#d4f1f9' if v==1 else '',subset=['RANK']),
-            use_container_width=True, height=260)
+            use_container_width=True, height=360)
 
             fig=px.bar(sub, x='Datel',
                        y=['Total Port_On Going','Total Port_Go Live'],
