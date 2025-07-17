@@ -135,9 +135,23 @@ def create_pivot_tables(df):
         witel_pivot = witel_pivot.round(0).astype(int, errors='ignore')
         witel_pivot['%'] = witel_pivot['%']  # Keep percentage as float for formatting
         
-        witel_pivot['RANK'] = witel_pivot['%'].rank(ascending=False, method='dense')
+        witel_pivot['RANK'] = witel_pivot['Total Port_Grand Total'].rank(ascending=False, method='min').astype(int)
         witel_pivot.loc['Grand Total', 'RANK'] = None
         
+        witel_display_data = {
+            'Witel': witel_pivot.index,
+            'On Going_Lop': witel_pivot['LoP_On Going'],
+            'On Going_Port': witel_pivot['Total Port_On Going'],
+            'Go Live_Lop': witel_pivot['LoP_Go Live'],
+            'Go Live_Port': witel_pivot['Total Port_Go Live'],
+            'Total Lop': witel_pivot['LoP_Grand Total'],
+            'Total Port': witel_pivot['Total Port_Grand Total'],
+            '%': witel_pivot['%'].round(0),
+            'Penambahan H-1 vs HI': witel_pivot['Penambahan H-1 vs HI'],
+            'RANK': witel_pivot['RANK']
+        }
+        
+        witel_display_df = pd.DataFrame(witel_display_data)
         # DATEL pivot
         datel_pivot = pd.pivot_table(
             df,
@@ -165,7 +179,7 @@ def create_pivot_tables(df):
         
         datel_pivot['RANK'] = datel_pivot.groupby('Witel')['Total Port_Go Live'].rank(ascending=False, method='min')
         
-        return witel_pivot, datel_pivot
+        return witel_display_df, datel_pivot
     except Exception as e:
         st.error(f"Error creating pivot tables: {str(e)}")
         return None, None
@@ -225,9 +239,12 @@ if view_mode == "Dashboard":
                     'Penambahan GOLIVE H-1 vs HI': '{:.0f}',
                     'RANK': '{:.0f}'
                 }).apply(
-                    lambda x: ['font-weight: bold' if x.name == 'Grand Total' else '' for _ in x],
-                    axis=1
-                ),
+                    lambda x: ['font-weight: bold' if x['Witel'] == 'Grand Total' else '' for _ in x],
+            axis=1
+        ).apply(
+            lambda x: ['background-color: #e6f3ff' if x['RANK'] == 1 else '' for _ in x],
+            axis=1
+        ),
                 use_container_width=True,
                 height=(len(witel_display_df) * 35 + 3)
             )
