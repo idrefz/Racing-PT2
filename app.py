@@ -119,6 +119,86 @@ def create_pivot_tables(df):
         st.error(f"Error creating pivot tables: {str(e)}")
         return None
 
+def display_witel_table(witel_display_df):
+    st.dataframe(
+        witel_display_df.style.format({
+            '%': '{:.0f}%',
+            'On Going_Lop': '{:.0f}',
+            'On Going_Port': '{:.0f}',
+            'Go Live_Lop': '{:.0f}',
+            'Go Live_Port': '{:.0f}',
+            'Total Lop': '{:.0f}',
+            'Total Port': '{:.0f}',
+            'GOLIVE H-1 vs HI': '{:.0f}',
+            'RANK': '{:.0f}'
+        }).apply(
+            lambda x: ['font-weight: bold' if x.name == 'Grand Total' else '' for _ in x],
+            axis=1
+        ).apply(
+            lambda x: ['background-color: #e6ffe6' if (x.name == 'GOLIVE H-1 vs HI' and val > 0) 
+                     else '' for val in x],
+            axis=0
+        ),
+        use_container_width=True,
+        height=(len(witel_display_df) * 35 + 3)
+    )
+
+def display_golive_changes(comparison):
+    if not comparison['changed_to_golive'].empty:
+        # 1. Bar Chart
+        st.subheader("📈 Penambahan GOLIVE H-1 vs HI per Witel")
+        
+        additions_df = pd.DataFrame({
+            'Witel': list(comparison['golive_additions'].keys()),
+            'Penambahan Port': list(comparison['golive_additions'].values())
+        }).sort_values('Penambahan Port', ascending=False)
+        
+        grand_total = pd.DataFrame({
+            'Witel': ['GRAND TOTAL'],
+            'Penambahan Port': [comparison['total_golive_added']]
+        })
+        additions_df = pd.concat([additions_df, grand_total])
+        
+        fig = px.bar(
+            additions_df,
+            x='Witel',
+            y='Penambahan Port',
+            color='Penambahan Port',
+            text='Penambahan Port',
+            title='Penambahan Port Go Live (H-1 vs HI)',
+            color_continuous_scale='greens'
+        )
+        fig.update_traces(texttemplate='%{y}', textposition='outside')
+        fig.update_layout(showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 2. Detailed Changes Table
+        st.subheader("📋 Detail Perubahan Status ke Go Live")
+        changes_df = comparison['changed_to_golive'][[
+            'Witel_HI', 'Datel_HI', 'Nama Proyek_HI',
+            'Status Proyek_H-1', 'Total Port_H-1',
+            'Status Proyek_HI', 'Total Port_HI'
+        ]].rename(columns={
+            'Witel_HI': 'WITEL',
+            'Datel_HI': 'DATEL',
+            'Nama Proyek_HI': 'NAMA PROYEK',
+            'Status Proyek_H-1': 'STATUS H-1',
+            'Total Port_H-1': 'PORT H-1',
+            'Status Proyek_HI': 'STATUS HI',
+            'Total Port_HI': 'PORT HI'
+        })
+        
+        st.dataframe(
+            changes_df.style.apply(
+                lambda x: ['background-color: #e6ffe6' if x['STATUS HI'] == 'Go Live' else '' 
+                          for i, x in changes_df.iterrows()],
+                axis=1
+            ),
+            use_container_width=True
+        )
+    else:
+        st.info("Tidak ada perubahan status ke Go Live pada periode ini")
+
 # UI Setup
 st.set_page_config(page_title="Delta Ticket Harian", layout="wide")
 
@@ -173,84 +253,11 @@ if view_mode == "Dashboard":
             
             # Display WITEL summary
             st.subheader("📊 Rekapitulasi per WITEL")
-            st.dataframe(
-                witel_display_df.style.format({
-                    '%': '{:.0f}%',
-                    'On Going_Lop': '{:.0f}',
-                    'On Going_Port': '{:.0f}',
-                    'Go Live_Lop': '{:.0f}',
-                    'Go Live_Port': '{:.0f}',
-                    'Total Lop': '{:.0f}',
-                    'Total Port': '{:.0f}',
-                    'GOLIVE H-1 vs HI': '{:.0f}',
-                    'RANK': '{:.0f}'
-                }).apply(
-                    lambda x: ['font-weight: bold' if x.name == 'Grand Total' else '' for _ in x],
-                    axis=1
-                ).apply(
-                    lambda x: ['background-color: #e6ffe6' if (x.name == 'GOLIVE H-1 vs HI' and val > 0) 
-                             else '' for val in x],
-                    axis=0
-                ),
-                use_container_width=True,
-                height=(len(witel_display_df) * 35 + 3)
+            display_witel_table(witel_display_df)
             
             # Show GOLIVE H-1 vs HI visualization if comparison data exists
             if 'comparison' in locals() and comparison:
-                # 1. Bar Chart
-                st.subheader("📈 Penambahan GOLIVE H-1 vs HI per Witel")
-                
-                additions_df = pd.DataFrame({
-                    'Witel': list(comparison['golive_additions'].keys()),
-                    'Penambahan Port': list(comparison['golive_additions'].values())
-                }).sort_values('Penambahan Port', ascending=False)
-                
-                grand_total = pd.DataFrame({
-                    'Witel': ['GRAND TOTAL'],
-                    'Penambahan Port': [comparison['total_golive_added']]
-                })
-                additions_df = pd.concat([additions_df, grand_total])
-                
-                fig = px.bar(
-                    additions_df,
-                    x='Witel',
-                    y='Penambahan Port',
-                    color='Penambahan Port',
-                    text='Penambahan Port',
-                    title='Penambahan Port Go Live (H-1 vs HI)',
-                    color_continuous_scale='greens'
-                )
-                fig.update_traces(texttemplate='%{y}', textposition='outside')
-                fig.update_layout(showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # 2. Detailed Changes Table
-                st.subheader("📋 Detail Perubahan Status ke Go Live")
-                if not comparison['changed_to_golive'].empty:
-                    changes_df = comparison['changed_to_golive'][[
-                        'Witel_HI', 'Datel_HI', 'Nama Proyek_HI',
-                        'Status Proyek_H-1', 'Total Port_H-1',
-                        'Status Proyek_HI', 'Total Port_HI'
-                    ]].rename(columns={
-                        'Witel_HI': 'WITEL',
-                        'Datel_HI': 'DATEL',
-                        'Nama Proyek_HI': 'NAMA PROYEK',
-                        'Status Proyek_H-1': 'STATUS H-1',
-                        'Total Port_H-1': 'PORT H-1',
-                        'Status Proyek_HI': 'STATUS HI',
-                        'Total Port_HI': 'PORT HI'
-                    })
-                    
-                    st.dataframe(
-                        changes_df.style.apply(
-                            lambda x: ['background-color: #e6ffe6' if x['STATUS HI'] == 'Go Live' else '' 
-                                      for i, x in changes_df.iterrows()],
-                            axis=1
-                        ),
-                        use_container_width=True
-                    )
-                else:
-                    st.info("Tidak ada perubahan status ke Go Live pada periode ini")
+                display_golive_changes(comparison)
             
             # Overall visualizations
             st.subheader("📊 Visualisasi Data")
