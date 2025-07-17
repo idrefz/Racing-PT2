@@ -120,42 +120,25 @@ def create_pivot_tables(df):
         
         # Calculate percentages
         if 'Total Port_Go Live' in witel_pivot.columns:
-            witel_pivot['Completion_Pct'] = (witel_pivot['Total Port_Go Live'] / 
-                                          witel_pivot['Total Port_Grand Total']).fillna(0) * 100
+            witel_pivot['%'] = (witel_pivot['Total Port_Go Live'] / 
+                               witel_pivot['Total Port_Grand Total']).fillna(0) * 100
         else:
-            witel_pivot['Completion_Pct'] = 0
+            witel_pivot['%'] = 0
             
-        # Add delta column with simpler name
-        witel_pivot['Delta_H1_vs_HI'] = 0
+        # Add delta column
+        witel_pivot['Penambahan GOLIVE H-1 vs HI'] = 0
         for witel in delta_values:
             if witel in witel_pivot.index:
-                witel_pivot.at[witel, 'Delta_H1_vs_HI'] = delta_values[witel]
+                witel_pivot.at[witel, 'Penambahan GOLIVE H-1 vs HI'] = delta_values[witel]
         
         # Convert all numbers to integers except percentage
         witel_pivot = witel_pivot.round(0).astype(int, errors='ignore')
-        witel_pivot['Completion_Pct'] = witel_pivot['Completion_Pct']  # Keep percentage as float
+        witel_pivot['%'] = witel_pivot['%']  # Keep percentage as float for formatting
         
-        # Rank by Total Port (descending)
-        witel_pivot['Rank'] = witel_pivot['Total Port_Grand Total'].rank(ascending=False, method='min').astype(int)
-        witel_pivot.loc['Grand Total', 'Rank'] = None
+        witel_pivot['RANK'] = witel_pivot['%'].rank(ascending=False, method='dense')
+        witel_pivot.loc['Grand Total', 'RANK'] = None
         
-        # Prepare display table with display names
-        witel_display_data = {
-            'Witel': witel_pivot.index,
-            'On Going (LoP)': witel_pivot['LoP_On Going'],
-            'On Going (Port)': witel_pivot['Total Port_On Going'],
-            'Go Live (LoP)': witel_pivot['LoP_Go Live'],
-            'Go Live (Port)': witel_pivot['Total Port_Go Live'],
-            'Total LoP': witel_pivot['LoP_Grand Total'],
-            'Total Port': witel_pivot['Total Port_Grand Total'],
-            'Completion %': witel_pivot['Completion_Pct'].round(0),
-            'Penambahan H-1 vs HI': witel_pivot['Delta_H1_vs_HI'],
-            'Rank': witel_pivot['Rank']
-        }
-        
-        witel_display_df = pd.DataFrame(witel_display_data)
-        
-        # DATEL pivot (unchanged)
+        # DATEL pivot
         datel_pivot = pd.pivot_table(
             df,
             values=['LoP', 'Total Port'],
@@ -170,19 +153,19 @@ def create_pivot_tables(df):
         
         # Calculate percentages
         if 'Total Port_Go Live' in datel_pivot.columns:
-            datel_pivot['Completion_Pct'] = (datel_pivot['Total Port_Go Live'] / 
-                                          (datel_pivot['Total Port_On Going'] + 
-                                           datel_pivot['Total Port_Go Live'])).fillna(0) * 100
+            datel_pivot['%'] = (datel_pivot['Total Port_Go Live'] / 
+                               (datel_pivot['Total Port_On Going'] + 
+                                datel_pivot['Total Port_Go Live'])).fillna(0) * 100
         else:
-            datel_pivot['Completion_Pct'] = 0
+            datel_pivot['%'] = 0
             
         # Convert all numbers to integers except percentage
         datel_pivot = datel_pivot.round(0).astype(int, errors='ignore')
-        datel_pivot['Completion_Pct'] = datel_pivot['Completion_Pct']
+        datel_pivot['%'] = datel_pivot['%']  # Keep percentage as float for formatting
         
-        datel_pivot['Rank'] = datel_pivot.groupby('Witel')['Total Port_Go Live'].rank(ascending=False, method='min')
+        datel_pivot['RANK'] = datel_pivot.groupby('Witel')['Total Port_Go Live'].rank(ascending=False, method='min')
         
-        return witel_display_df, datel_pivot
+        return witel_pivot, datel_pivot
     except Exception as e:
         st.error(f"Error creating pivot tables: {str(e)}")
         return None, None
@@ -242,12 +225,9 @@ if view_mode == "Dashboard":
                     'Penambahan GOLIVE H-1 vs HI': '{:.0f}',
                     'RANK': '{:.0f}'
                 }).apply(
-                    lambda x: ['font-weight: bold' if x['Witel'] == 'Grand Total' else '' for _ in x],
-            axis=1
-        ).apply(
-            lambda x: ['background-color: #e6f3ff' if x['RANK'] == 1 else '' for _ in x],
-            axis=1
-        ),
+                    lambda x: ['font-weight: bold' if x.name == 'Grand Total' else '' for _ in x],
+                    axis=1
+                ),
                 use_container_width=True,
                 height=(len(witel_display_df) * 35 + 3)
             )
