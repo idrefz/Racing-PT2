@@ -88,7 +88,7 @@ def create_pivot_tables(df):
         else:
             witel_pivot['%'] = 0
             
-        witel_pivot['RANK'] = witel_pivot['Total Port_Grand Total'].rank(ascending=False, method='min')
+        witel_pivot['RANK'] = witel_pivot['%'].rank(ascending=False, method='dense')
         witel_pivot.loc['Grand Total', 'RANK'] = None
         
         # DATEL pivot
