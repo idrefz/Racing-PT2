@@ -33,24 +33,26 @@ def compare_with_previous(df_curr):
             prev_path = os.path.join(DATA_FOLDER, f"previous_{prev_hash}.xlsx")
             if os.path.exists(prev_path):
                 df_prev = pd.read_excel(prev_path)
-                go_curr = df_curr[df_curr['Status Proyek']=='Go Live'].groupby('Witel')['Total Port'].sum()
-                go_prev = df_prev[df_prev['Status Proyek']=='Go Live'].groupby('Witel')['Total Port'].sum()
+                go_curr = (df_curr[df_curr['Status Proyek']=='Go Live']
+                           .groupby('Witel')['Total Port'].sum())
+                go_prev = (df_prev[df_prev['Status Proyek']=='Go Live']
+                           .groupby('Witel')['Total Port'].sum())
                 for w in go_curr.index:
                     delta[w] = int(go_curr[w] - go_prev.get(w, 0))
     return delta
 
 def record_upload_history():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # retrieve last hash
+    # last hash
     last_hash = ""
     if os.path.exists(HISTORY_FILE):
         h = pd.read_csv(HISTORY_FILE)
         if not h.empty:
             last_hash = h.iloc[-1]['file_hash']
-    # compute new
+    # new hash
     with open(LATEST_FILE,'rb') as f:
         new_hash = get_file_hash(f.read())
-    # archive previous copy if changed
+    # archive previous if changed
     if last_hash and last_hash != new_hash:
         shutil.copy(LATEST_FILE, os.path.join(DATA_FOLDER, f"previous_{last_hash}.xlsx"))
     # append history
@@ -84,7 +86,7 @@ def create_pivots(df):
     delta = compare_with_previous(df)
     df['LoP'] = 1
 
-    # Witel pivot
+    # --- Witel pivot ---
     w = pd.pivot_table(
         df,
         values=['LoP','Total Port'],
@@ -95,14 +97,21 @@ def create_pivots(df):
         margins=True,
         margins_name='Grand Total'
     )
+    # flatten columns
     w.columns = ['_'.join(col) for col in w.columns]
+    # percentage
     w['%'] = (w.get('Total Port_Go Live',0) / w['Total Port_Grand Total']).fillna(0) * 100
-    w['Penambahan GOLIVE H-1 vs HI'] = [ delta.get(witel, 0) for witel in w.index ]
+    # delta
+    w['Penambahan GOLIVE H-1 vs HI'] = [delta.get(witel,0) for witel in w.index]
+    # rank overall
     w['RANK'] = w['%'].rank(ascending=False, method='dense')
-    w = w.round(0).astype({c:int for c in w.columns if c not in ['%']})
+    # ensure integer types
+    for col in w.columns:
+        if col not in ['%']:
+            w[col] = w[col].round(0).astype(int)
     w.loc['Grand Total','RANK'] = None
 
-    # Datel pivot
+    # --- Datel pivot ---
     d = pd.pivot_table(
         df,
         values=['LoP','Total Port'],
@@ -112,9 +121,21 @@ def create_pivots(df):
         fill_value=0
     )
     d.columns = ['_'.join(col) for col in d.columns]
-    d['%'] = (d.get('Total Port_Go Live',0) / (d.get('Total Port_On Going',0) + d.get('Total Port_Go Live',0))).fillna(0) * 100
-    d['RANK'] = d.groupby(level=0).get('Total Port_Go Live',0).rank(ascending=False, method='min')
-    d = d.round(0).astype({c:int for c in d.columns if c not in ['%']})
+    # percentage per Datel
+    total_on = d.get('Total Port_On Going',0)
+    total_gl = d.get('Total Port_Go Live',0)
+    d['%'] = (total_gl / (total_on + total_gl)).fillna(0) * 100
+
+    # ---- FIXED: correct ranking per Witel ----
+    if 'Total Port_Go Live' in d.columns:
+        # group the series, then rank
+        d['RANK'] = d['Total Port_Go Live'].groupby(level=0).rank(ascending=False, method='min')
+    else:
+        d['RANK'] = 0
+    # cast to int where appropriate
+    for col in d.columns:
+        if col not in ['%']:
+            d[col] = d[col].round(0).astype(int)
 
     return w, d
 
@@ -123,7 +144,7 @@ st.set_page_config(page_title="Delta Ticket Harian", layout="wide")
 st.sidebar.title("Navigasi")
 mode = st.sidebar.radio("Pilih Mode", ["Dashboard","Upload Data"])
 
-if mode=="Dashboard":
+if mode == "Dashboard":
     st.title("📊 Dashboard Monitoring Deployment PT2 IHLD")
     if os.path.exists(LATEST_FILE):
         df = load_excel(LATEST_FILE)
@@ -131,10 +152,10 @@ if mode=="Dashboard":
         # Regional filter
         regions = ['All'] + sorted(df['Regional'].dropna().unique())
         sel = st.selectbox("Pilih Regional", regions)
-        if sel!='All':
+        if sel != 'All':
             df = df[df['Regional']==sel]
 
-        # Tabel Go Live
+        # Go Live detail
         go = df[df['Status Proyek']=='Go Live']
         if not go.empty:
             st.subheader("📋 Detail Proyek Go Live")
@@ -160,7 +181,7 @@ if mode=="Dashboard":
             'LoP_On Going':'On Going_Lop','Total Port_On Going':'On Going_Port',
             'LoP_Go Live':'Go Live_Lop','Total Port_Go Live':'Go Live_Port'
         })
-        # Pastikan kolom ada sebelum dijumlahkan
+        # pastikan kolom ada
         for c in ['On Going_Lop','Go Live_Lop','On Going_Port','Go Live_Port']:
             if c not in dp.columns:
                 dp[c] = 0
@@ -182,7 +203,7 @@ if mode=="Dashboard":
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-        # Visualisasi umum
+        # Overall charts
         st.subheader("📈 Visualisasi Data")
         plot = wp[wp['Witel']!='Grand Total'].sort_values('Total Port', ascending=False)
         c1, c2 = st.columns(2)
@@ -204,7 +225,7 @@ if mode=="Dashboard":
     else:
         st.warning("Belum ada data yang diupload. Silakan ke halaman Upload Data.")
 
-else:  # Upload Data
+else:  # Upload Data View
     st.title("📤 Upload Data Harian")
     last_ts, last_h = get_last_upload_info()
     if last_ts:
@@ -214,7 +235,7 @@ else:  # Upload Data
     if upl:
         try:
             curr_h = get_file_hash(upl.getvalue())
-            if last_h and curr_h==last_h:
+            if last_h and curr_h == last_h:
                 st.success("✅ Data sama dengan upload terakhir. Tidak perlu upload ulang.")
             else:
                 df_new = pd.read_excel(upl)
@@ -249,7 +270,7 @@ else:  # Upload Data
             st.error(f"Kesalahan saat memproses file: {e}")
 
 # Sidebar: upload history
-if mode=="Upload Data" and os.path.exists(HISTORY_FILE):
+if mode == "Upload Data" and os.path.exists(HISTORY_FILE):
     hist = pd.read_csv(HISTORY_FILE)
     st.sidebar.subheader("History Upload")
     st.sidebar.dataframe(hist[['timestamp']].tail(5), hide_index=True)
