@@ -320,4 +320,7 @@ else:
 if view_mode == "Upload Data" and os.path.exists(HISTORY_FILE):
     st.sidebar.subheader("History Upload")
     history_df = pd.read_csv(HISTORY_FILE)
-    st.sidebar.dataframe(history_df[['timestamp']].tail(5), hide_index=True)
+    st.sidebar.dataframe(
+        history_df[['timestamp']].tail(5),
+        hide_index=True
+    )
