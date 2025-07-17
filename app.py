@@ -179,7 +179,7 @@ view_mode = st.sidebar.radio("Pilih Mode", ["Dashboard", "Upload Data"])
 
 # Dashboard View
 if view_mode == "Dashboard":
-    st.title("📊 Dashboard Monitoring Deployment")
+    st.title("📊 Dashboard Monitoring Deployment PT2 IHLD")
     
     if os.path.exists(LATEST_FILE):
         df = load_excel(LATEST_FILE)
