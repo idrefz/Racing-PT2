@@ -1,28 +1,62 @@
 import streamlit as st
 import pandas as pd
 import os
+from datetime import datetime
 import plotly.express as px
+import hashlib
 
 # Config
 DATA_FOLDER = "data_daily_uploads"
 LATEST_FILE = os.path.join(DATA_FOLDER, "latest.xlsx")
 YESTERDAY_FILE = os.path.join(DATA_FOLDER, "yesterday.xlsx")
+HISTORY_FILE = os.path.join(DATA_FOLDER, "upload_history.csv")
 
 # Create folder if not exists
 if not os.path.exists(DATA_FOLDER):
     os.makedirs(DATA_FOLDER)
 
-# Helper to load Excel
+# Initialize session state
+if 'view_mode' not in st.session_state:
+    st.session_state.view_mode = 'dashboard'
+if 'upload_complete' not in st.session_state:
+    st.session_state.upload_complete = False
+
+# Helper functions
 @st.cache_data
 def load_excel(file):
     return pd.read_excel(file)
 
-# Helper: save file
 def save_file(path, uploaded_file):
     with open(path, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
-# Helper: compare two dataframes with additional columns
+def get_file_hash(file_path):
+    with open(file_path, "rb") as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+def record_upload_history():
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    file_hash = get_file_hash(LATEST_FILE) if os.path.exists(LATEST_FILE) else ""
+    
+    if os.path.exists(HISTORY_FILE):
+        history_df = pd.read_csv(HISTORY_FILE)
+    else:
+        history_df = pd.DataFrame(columns=['timestamp', 'file_hash'])
+    
+    history_df = pd.concat([
+        history_df,
+        pd.DataFrame([[now, file_hash]], columns=['timestamp', 'file_hash'])
+    ], ignore_index=True)
+    
+    history_df.to_csv(HISTORY_FILE, index=False)
+
+def get_last_upload_info():
+    if os.path.exists(HISTORY_FILE):
+        history_df = pd.read_csv(HISTORY_FILE)
+        if not history_df.empty:
+            return history_df.iloc[-1]['timestamp'], history_df.iloc[-1]['file_hash']
+    return None, None
+
 def compare_data(df_old, df_new):
     col_ticket = "Ticket ID"
     col_status = "Status Proyek"
@@ -90,17 +124,9 @@ def compare_data(df_old, df_new):
         "total_golive_port_added": total_golive_port_added
     }
 
-# UI Starts
-st.set_page_config(page_title="Delta Ticket Harian", layout="wide")
-st.title("📊 Delta Ticket Harian (H vs H+1)")
-
-uploaded = st.file_uploader("Upload file hari ini (H+1)", type="xlsx")
-
-if uploaded:
-    df_new = load_excel(uploaded)
-    df_new["LoP"] = 1
-    df_new["Total Port"] = pd.to_numeric(df_new["Total Port"], errors="coerce")
-
+def show_dashboard(df_new):
+    st.title("📊 Dashboard Monitoring Harian")
+    
     # Regional filter
     regional_list = df_new['Regional'].dropna().unique().tolist()
     selected_regional = st.selectbox("Pilih Regional", ["All"] + sorted(regional_list))
@@ -108,33 +134,20 @@ if uploaded:
     if selected_regional != "All":
         df_new = df_new[df_new["Regional"] == selected_regional]
 
-    if os.path.exists(LATEST_FILE):
-        df_old = load_excel(LATEST_FILE)
+    if os.path.exists(YESTERDAY_FILE):
+        df_old = load_excel(YESTERDAY_FILE)
         if selected_regional != "All":
             df_old = df_old[df_old["Regional"] == selected_regional]
         
         result = compare_data(df_old, df_new)
 
-        st.subheader(":bar_chart: Ringkasan")
+        st.subheader(":bar_chart: Ringkasan Harian")
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Total H", result['total_old'])
         col2.metric("Total H+1", result['total_new'])
         col3.metric("Ticket Baru", result['new_count'])
         col4.metric("Ticket Hilang", result['removed_count'])
         col5.metric("Status Berubah", result['changed_count'])
-
-        st.subheader(":pencil: Detail Perubahan Status")
-        st.dataframe(result['changed_df'][[
-            "Witel", "Datel", "Nama Proyek", "Status Proyek H", "Total Port H"
-        ]], use_container_width=True)
-    else:
-        st.warning("Tidak ditemukan data sebelumnya. Ini akan jadi referensi awal (H).")
-
-    # Save backup kemarin
-    if os.path.exists(LATEST_FILE):
-        os.replace(LATEST_FILE, YESTERDAY_FILE)
-    save_file(LATEST_FILE, uploaded)
-    st.success("File berhasil disimpan sebagai referensi terbaru (H)")
 
     # Pivot-style Table for Project Status
     st.subheader("\U0001F4CA Rekapitulasi Deployment per Witel")
@@ -161,10 +174,15 @@ if uploaded:
     pivot_table['RANK'] = pivot_table.index.map(ranks)
     
     # Add GOLIVE H-1 vs HI per Witel
-    golive_port_added = result.get('golive_port_by_witel', pd.Series())
-    pivot_table['Penambahan GOLIVE'] = pivot_table.index.map(
-        lambda x: golive_port_added.get(x, 0) if os.path.exists(LATEST_FILE) else 0
-    )
+    if os.path.exists(YESTERDAY_FILE):
+        df_old = load_excel(YESTERDAY_FILE)
+        result = compare_data(df_old, df_new)
+        golive_port_added = result.get('golive_port_by_witel', pd.Series())
+        pivot_table['Penambahan GOLIVE'] = pivot_table.index.map(
+            lambda x: golive_port_added.get(x, 0)
+        )
+    else:
+        pivot_table['Penambahan GOLIVE'] = 0
 
     # Create display table
     display_table = pd.DataFrame({
@@ -199,15 +217,25 @@ if uploaded:
         use_container_width=True
     )
 
-    # Breakdown by Datel
+    # Breakdown by Datel with Witel filter
     st.subheader("📊 Breakdown per Datel")
+    
+    # Witel filter for Datel breakdown
+    witel_list = df_new['Witel'].dropna().unique().tolist()
+    selected_witel = st.selectbox("Pilih Witel untuk Breakdown Datel", ["All"] + sorted(witel_list))
+
+    # Filter by selected Witel if not "All"
+    if selected_witel != "All":
+        df_filtered = df_new[df_new['Witel'] == selected_witel]
+    else:
+        df_filtered = df_new
 
     # Group by Datel and calculate metrics
-    datel_table = df_new.groupby('Datel').agg(
-        On_Going_LOP=('LoP', lambda x: x[df_new['Status Proyek'] == 'On Going'].sum()),
-        On_Going_Port=('Total Port', lambda x: x[df_new['Status Proyek'] == 'On Going'].sum()),
-        Go_Live_LOP=('LoP', lambda x: x[df_new['Status Proyek'] == 'Go Live'].sum()),
-        Go_Live_Port=('Total Port', lambda x: x[df_new['Status Proyek'] == 'Go Live'].sum())
+    datel_table = df_filtered.groupby('Datel').agg(
+        On_Going_LOP=('LoP', lambda x: x[df_filtered['Status Proyek'] == 'On Going'].sum()),
+        On_Going_Port=('Total Port', lambda x: x[df_filtered['Status Proyek'] == 'On Going'].sum()),
+        Go_Live_LOP=('LoP', lambda x: x[df_filtered['Status Proyek'] == 'Go Live'].sum()),
+        Go_Live_Port=('Total Port', lambda x: x[df_filtered['Status Proyek'] == 'Go Live'].sum())
     ).reset_index()
 
     # Calculate totals and percentages
@@ -216,7 +244,9 @@ if uploaded:
     datel_table['%'] = (datel_table['Go_Live_Port'] / datel_table['Total Port'] * 100).round(0)
 
     # Add GOLIVE additions per Datel
-    if os.path.exists(LATEST_FILE):
+    if os.path.exists(YESTERDAY_FILE):
+        df_old = load_excel(YESTERDAY_FILE)
+        result = compare_data(df_old, df_new)
         golive_port_added = result.get('golive_port_by_datel', pd.Series())
         datel_table['Penambahan'] = datel_table['Datel'].map(
             lambda x: golive_port_added.get(x, 0)
@@ -292,5 +322,72 @@ if uploaded:
             )
             st.plotly_chart(fig2, use_container_width=True)
 
-else:
-    st.info("Silakan upload file Excel untuk diproses.")
+# Navigation
+st.sidebar.title("Menu Navigasi")
+view_mode = st.sidebar.radio("Pilih Mode:", ["📊 Dashboard", "⬆️ Upload Data"])
+
+# Main App Logic
+if view_mode == "📊 Dashboard":
+    if os.path.exists(LATEST_FILE):
+        df_new = load_excel(LATEST_FILE)
+        show_dashboard(df_new)
+    else:
+        st.warning("Belum ada data yang diupload. Silakan ke menu Upload Data.")
+
+elif view_mode == "⬆️ Upload Data":
+    st.title("⬆️ Upload Data Harian")
+    
+    # Show last upload info
+    last_upload_time, last_hash = get_last_upload_info()
+    if last_upload_time:
+        st.info(f"Terakhir upload: {last_upload_time}")
+    
+    uploaded = st.file_uploader("Upload file hari ini (H+1)", type="xlsx")
+    
+    if uploaded:
+        # Calculate hash of uploaded file
+        uploaded_hash = hashlib.md5(uploaded.getvalue()).hexdigest()
+        
+        if last_hash and uploaded_hash == last_hash:
+            st.warning("Data yang diupload sama dengan data terakhir. Tidak ada perubahan.")
+            st.session_state.upload_complete = False
+        else:
+            df_new = load_excel(uploaded)
+            df_new["LoP"] = 1
+            df_new["Total Port"] = pd.to_numeric(df_new["Total Port"], errors="coerce")
+            
+            if os.path.exists(LATEST_FILE):
+                df_old = load_excel(LATEST_FILE)
+                result = compare_data(df_old, df_new)
+                
+                st.subheader("Perubahan dari Data Sebelumnya")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Ticket Baru", result['new_count'])
+                col2.metric("Ticket Hilang", result['removed_count'])
+                col3.metric("Status Berubah", result['changed_count'])
+                
+                if not result['changed_df'].empty:
+                    st.dataframe(result['changed_df'], use_container_width=True)
+                else:
+                    st.info("Tidak ada perubahan status ticket")
+            
+            # Save files
+            if os.path.exists(LATEST_FILE):
+                os.replace(LATEST_FILE, YESTERDAY_FILE)
+            save_file(LATEST_FILE, uploaded)
+            record_upload_history()
+            
+            st.success("Data berhasil diupload dan disimpan!")
+            st.session_state.upload_complete = True
+            
+            # Show preview
+            st.subheader("Preview Data Terupload")
+            st.dataframe(df_new.head())
+    else:
+        st.info("Silakan upload file Excel untuk memperbarui data.")
+        st.session_state.upload_complete = False
+
+    if st.session_state.upload_complete:
+        if st.button("Lihat Dashboard"):
+            st.session_state.view_mode = 'dashboard'
+            st.experimental_rerun()
