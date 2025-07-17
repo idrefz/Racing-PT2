@@ -126,7 +126,13 @@ def compare_data(df_old, df_new):
 
 def show_dashboard(df_new):
     st.title("📊 Dashboard Monitoring Harian")
+    # Check for required columns
+    required_columns = ['Regional', 'Witel', 'Status Proyek', 'LoP', 'Total Port']
+    missing_columns = [col for col in required_columns if col not in df_new.columns]
     
+    if missing_columns:
+        st.error(f"Data tidak valid. Kolom yang dibutuhkan tidak ditemukan: {', '.join(missing_columns)}")
+        return
     # Regional filter
     regional_list = df_new['Regional'].dropna().unique().tolist()
     selected_regional = st.selectbox("Pilih Regional", ["All"] + sorted(regional_list))
@@ -152,17 +158,37 @@ def show_dashboard(df_new):
     # Pivot-style Table for Project Status
     st.subheader("\U0001F4CA Rekapitulasi Deployment per Witel")
     
-    # Create pivot table
-    pivot_table = pd.pivot_table(
-        df_new,
-        values=["LoP", "Total Port"],
-        index="Witel",
-        columns="Status Proyek",
-        aggfunc="sum",
-        fill_value=0,
-        margins=True,
-        margins_name="Grand Total"
-    )
+    # Create pivot tabletry:
+        # Create pivot table with proper column checks
+        pivot_columns = ['LoP', 'Total Port']
+        pivot_index = 'Witel'
+        pivot_cols = 'Status Proyek'
+        
+        # Verify all pivot columns exist
+        for col in pivot_columns + [pivot_index, pivot_cols]:
+            if col not in df_new.columns:
+                raise KeyError(f"Kolom '{col}' tidak ditemukan dalam data")
+        
+        pivot_table = pd.pivot_table(
+            df_new,
+            values=pivot_columns,
+            index=pivot_index,
+            columns=pivot_cols,
+            aggfunc="sum",
+            fill_value=0,
+            margins=True,
+            margins_name="Grand Total"
+        )
+        
+        # Rest of your pivot table processing...
+        
+    except KeyError as e:
+        st.error(f"Error dalam memproses data: {str(e)}")
+        st.warning("Pastikan file yang diupload memiliki format yang benar dengan kolom yang diperlukan")
+        return
+    except Exception as e:
+        st.error(f"Terjadi kesalahan: {str(e)}")
+        return
     
     # Calculate additional metrics
     pivot_table['%'] = (pivot_table[('Total Port', 'Go Live')] / 
