@@ -33,28 +33,23 @@ def compare_with_previous(current_df):
     """
     delta_dict = {}
     
-    # Check if history file exists and has at least 2 entries
     if os.path.exists(HISTORY_FILE):
         history_df = pd.read_csv(HISTORY_FILE)
         if len(history_df) >= 2:
             previous_hash = history_df.iloc[-2]['file_hash']
             previous_file = os.path.join(DATA_FOLDER, f"previous_{previous_hash}.xlsx")
             
-            # If we have the previous file saved
             if os.path.exists(previous_file):
                 previous_df = pd.read_excel(previous_file)
                 
-                # Calculate Go Live totals for current and previous data
                 current_golive = current_df[current_df['Status Proyek'] == 'Go Live'].groupby('Witel')['Total Port'].sum()
                 previous_golive = previous_df[previous_df['Status Proyek'] == 'Go Live'].groupby('Witel')['Total Port'].sum()
                 
-                # Calculate delta
                 for witel in current_golive.index:
                     current_val = current_golive[witel]
                     previous_val = previous_golive.get(witel, 0)
                     delta_dict[witel] = current_val - previous_val
                 
-                # Save current file as previous for next comparison
                 shutil.copy(LATEST_FILE, previous_file)
     
     return delta_dict
@@ -66,7 +61,6 @@ def record_upload_history():
     history_df = pd.DataFrame(columns=['timestamp', 'file_hash'])
     if os.path.exists(HISTORY_FILE):
         history_df = pd.read_csv(HISTORY_FILE)
-        # Save current file as previous before updating
         if not history_df.empty:
             previous_hash = history_df.iloc[-1]['file_hash']
             previous_file = os.path.join(DATA_FOLDER, f"previous_{previous_hash}.xlsx")
@@ -107,7 +101,7 @@ def create_pivot_tables(df):
         delta_values = compare_with_previous(df)
         
         # WITEL level summary
-        df['LoP'] = 1  # Each row is one project
+        df['LoP'] = 1
         
         # WITEL pivot
         witel_pivot = pd.pivot_table(
@@ -137,6 +131,10 @@ def create_pivot_tables(df):
             if witel in witel_pivot.index:
                 witel_pivot.at[witel, 'Penambahan GOLIVE H-1 vs HI'] = delta_values[witel]
         
+        # Convert all numbers to integers except percentage
+        witel_pivot = witel_pivot.round(0).astype(int, errors='ignore')
+        witel_pivot['%'] = witel_pivot['%']  # Keep percentage as float for formatting
+        
         witel_pivot['RANK'] = witel_pivot['%'].rank(ascending=False, method='dense')
         witel_pivot.loc['Grand Total', 'RANK'] = None
         
@@ -161,6 +159,10 @@ def create_pivot_tables(df):
         else:
             datel_pivot['%'] = 0
             
+        # Convert all numbers to integers except percentage
+        datel_pivot = datel_pivot.round(0).astype(int, errors='ignore')
+        datel_pivot['%'] = datel_pivot['%']  # Keep percentage as float for formatting
+        
         datel_pivot['RANK'] = datel_pivot.groupby('Witel')['Total Port_Go Live'].rank(ascending=False, method='min')
         
         return witel_pivot, datel_pivot
@@ -209,7 +211,7 @@ if view_mode == "Dashboard":
             
             witel_display_df = pd.DataFrame(witel_display_data)
             
-            # Display WITEL summary
+            # Display WITEL summary with whole numbers
             st.subheader("📊 Rekapitulasi per WITEL")
             st.dataframe(
                 witel_display_df.style.format({
@@ -228,6 +230,7 @@ if view_mode == "Dashboard":
                 ),
                 use_container_width=True,
                 height=(len(witel_display_df) * 35 + 3)
+            )
             
             # Display DATEL summary
             st.subheader("🏆 Racing per DATEL")
@@ -377,7 +380,7 @@ else:
                     st.subheader("📋 Ringkasan Data")
                     cols = st.columns(4)
                     cols[0].metric("Total Projek", len(df))
-                    cols[1].metric("Total Port", df['Total Port'].sum())
+                    cols[1].metric("Total Port", int(df['Total Port'].sum()))
                     cols[2].metric("WITEL", df['Witel'].nunique())
                     cols[3].metric("DATEL", df['Datel'].nunique())
                     
