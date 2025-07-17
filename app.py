@@ -8,7 +8,6 @@ import hashlib
 # Configuration
 DATA_FOLDER = "data_daily_uploads"
 LATEST_FILE = os.path.join(DATA_FOLDER, "latest.xlsx")
-YESTERDAY_FILE = os.path.join(DATA_FOLDER, "yesterday.xlsx")
 HISTORY_FILE = os.path.join(DATA_FOLDER, "upload_history.csv")
 
 # Create folder if not exists
@@ -49,7 +48,7 @@ def get_last_upload_info():
     return None, None
 
 def validate_data(df):
-    required_columns = ['Regional', 'Witel', 'Status Proyek', 'Total Port', 'Datel', 'Ticket ID', 'Nama Proyek']
+    required_columns = ['Regional', 'Witel', 'Status Proyek', 'Total Port', 'Datel', 'Ticket ID']
     missing_columns = [col for col in required_columns if col not in df.columns]
     
     if missing_columns:
@@ -62,36 +61,12 @@ def validate_data(df):
     
     return True, "Data valid"
 
-def compare_data(df_old, df_new):
-    try:
-        comparison_cols = ['Ticket ID', 'Status Proyek', 'Total Port', 'Witel', 'Datel', 'Nama Proyek']
-        df_old = df_old[comparison_cols].dropna(subset=['Ticket ID', 'Status Proyek', 'Total Port'])
-        df_new = df_new[comparison_cols].dropna(subset=['Ticket ID', 'Status Proyek', 'Total Port'])
-
-        merged = pd.merge(df_old, df_new, on='Ticket ID', suffixes=('_H-1', '_HI'))
-        
-        changed_to_golive = merged[
-            (merged['Status Proyek_H-1'] != 'Go Live') & 
-            (merged['Status Proyek_HI'] == 'Go Live')
-        ]
-        
-        golive_additions = changed_to_golive.groupby('Witel_HI')['Total Port_HI'].sum()
-        total_golive_added = golive_additions.sum()
-        
-        return {
-            'changed_to_golive': changed_to_golive,
-            'golive_additions': golive_additions,
-            'total_golive_added': total_golive_added,
-            'changes': merged
-        }
-    except Exception as e:
-        st.error(f"Error comparing data: {str(e)}")
-        return None
-
 def create_pivot_tables(df):
     try:
-        df['LoP'] = 1
+        # WITEL level summary
+        df['LoP'] = 1  # Each row is one project
         
+        # WITEL pivot
         witel_pivot = pd.pivot_table(
             df,
             values=['LoP', 'Total Port'],
@@ -103,8 +78,10 @@ def create_pivot_tables(df):
             margins_name='Grand Total'
         )
         
+        # Flatten multi-index columns
         witel_pivot.columns = ['_'.join(col) if isinstance(col, tuple) else col for col in witel_pivot.columns]
         
+        # Calculate percentages
         if 'Total Port_Go Live' in witel_pivot.columns:
             witel_pivot['%'] = (witel_pivot['Total Port_Go Live'] / 
                                witel_pivot['Total Port_Grand Total']).fillna(0) * 100
@@ -114,6 +91,7 @@ def create_pivot_tables(df):
         witel_pivot['RANK'] = witel_pivot['%'].rank(ascending=False, method='dense')
         witel_pivot.loc['Grand Total', 'RANK'] = None
         
+        # DATEL pivot
         datel_pivot = pd.pivot_table(
             df,
             values=['LoP', 'Total Port'],
@@ -123,8 +101,10 @@ def create_pivot_tables(df):
             fill_value=0
         )
         
+        # Flatten multi-index columns
         datel_pivot.columns = ['_'.join(col) if isinstance(col, tuple) else col for col in datel_pivot.columns]
         
+        # Calculate percentages
         if 'Total Port_Go Live' in datel_pivot.columns:
             datel_pivot['%'] = (datel_pivot['Total Port_Go Live'] / 
                                (datel_pivot['Total Port_On Going'] + 
@@ -138,92 +118,6 @@ def create_pivot_tables(df):
     except Exception as e:
         st.error(f"Error creating pivot tables: {str(e)}")
         return None, None
-
-def display_witel_table(witel_display_df, comparison=None):
-    style = witel_display_df.style.format({
-        '%': '{:.0f}%',
-        'On Going_Lop': '{:.0f}',
-        'On Going_Port': '{:.0f}',
-        'Go Live_Lop': '{:.0f}',
-        'Go Live_Port': '{:.0f}',
-        'Total Lop': '{:.0f}',
-        'Total Port': '{:.0f}',
-        'RANK': '{:.0f}'
-    }).apply(
-        lambda x: ['font-weight: bold' if x.name == 'Grand Total' else '' for _ in x],
-        axis=1
-    )
-    
-    if comparison and 'GOLIVE H-1 vs HI' in witel_display_df.columns:
-        style = style.apply(
-            lambda x: ['background-color: #e6ffe6' if (x.name == 'GOLIVE H-1 vs HI' and val > 0) 
-                      else '' for val in x],
-            axis=0
-        ).format({
-            'GOLIVE H-1 vs HI': '{:.0f}'
-        })
-    
-    st.dataframe(
-        style,
-        use_container_width=True,
-        height=(len(witel_display_df) * 35 + 3)
-    )
-
-def display_golive_changes(comparison):
-    if not comparison['changed_to_golive'].empty:
-        # 1. Bar Chart
-        st.subheader("📈 Penambahan GOLIVE H-1 vs HI per Witel")
-        
-        additions_df = pd.DataFrame({
-            'Witel': list(comparison['golive_additions'].keys()),
-            'Penambahan Port': list(comparison['golive_additions'].values())
-        }).sort_values('Penambahan Port', ascending=False)
-        
-        grand_total = pd.DataFrame({
-            'Witel': ['GRAND TOTAL'],
-            'Penambahan Port': [comparison['total_golive_added']]
-        })
-        additions_df = pd.concat([additions_df, grand_total])
-        
-        fig = px.bar(
-            additions_df,
-            x='Witel',
-            y='Penambahan Port',
-            color='Penambahan Port',
-            text='Penambahan Port',
-            title='Penambahan Port Go Live (H-1 vs HI)',
-            color_continuous_scale='greens'
-        )
-        fig.update_traces(texttemplate='%{y}', textposition='outside')
-        fig.update_layout(showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # 2. Detailed Changes Table
-        st.subheader("📋 Detail Perubahan Status ke Go Live")
-        changes_df = comparison['changed_to_golive'][[
-            'Witel_HI', 'Datel_HI', 'Nama Proyek_HI',
-            'Status Proyek_H-1', 'Total Port_H-1',
-            'Status Proyek_HI', 'Total Port_HI'
-        ]].rename(columns={
-            'Witel_HI': 'WITEL',
-            'Datel_HI': 'DATEL',
-            'Nama Proyek_HI': 'NAMA PROYEK',
-            'Status Proyek_H-1': 'STATUS H-1',
-            'Total Port_H-1': 'PORT H-1',
-            'Status Proyek_HI': 'STATUS HI',
-            'Total Port_HI': 'PORT HI'
-        })
-        
-        st.dataframe(
-            changes_df.style.apply(
-                lambda x: ['background-color: #e6ffe6' if x['STATUS HI'] == 'Go Live' else '' 
-                          for i, x in changes_df.iterrows()],
-                axis=1
-            ),
-            use_container_width=True
-        )
-    else:
-        st.info("Tidak ada perubahan status ke Go Live pada periode ini")
 
 # UI Setup
 st.set_page_config(page_title="Delta Ticket Harian", layout="wide")
@@ -239,15 +133,18 @@ if view_mode == "Dashboard":
     if os.path.exists(LATEST_FILE):
         df = load_excel(LATEST_FILE)
         
+        # Regional filter
         regional_list = ['All'] + sorted(df['Regional'].dropna().unique().tolist())
         selected_region = st.selectbox("Pilih Regional", regional_list)
         
         if selected_region != 'All':
             df = df[df['Regional'] == selected_region]
         
+        # Create pivot tables
         witel_pivot, datel_pivot = create_pivot_tables(df)
         
         if witel_pivot is not None:
+            # Prepare WITEL display table
             witel_display_data = {
                 'Witel': witel_pivot.index,
                 'On Going_Lop': witel_pivot['LoP_On Going'],
@@ -260,36 +157,33 @@ if view_mode == "Dashboard":
                 'RANK': witel_pivot['RANK']
             }
             
-            # Add GOLIVE H-1 vs HI column if comparison data exists
-            comparison = None
-            if os.path.exists(YESTERDAY_FILE):
-                df_old = load_excel(YESTERDAY_FILE)
-                if selected_region != 'All':
-                    df_old = df_old[df_old['Regional'] == selected_region]
-                
-                comparison = compare_data(df_old, df)
-                if comparison:
-                    witel_display_data['GOLIVE H-1 vs HI'] = [
-                        comparison['golive_additions'].get(witel, 0) 
-                        if witel != 'Grand Total' 
-                        else comparison['total_golive_added']
-                        for witel in witel_pivot.index
-                    ]
-            
             witel_display_df = pd.DataFrame(witel_display_data)
             
-            # Display WITEL summary
+            # Display WITEL summary - FIXED PARENTHESIS ISSUE HERE
             st.subheader("📊 Rekapitulasi per WITEL")
-            display_witel_table(witel_display_df, comparison)
-            
-            # Show GOLIVE H-1 vs HI visualization if comparison data exists
-            if comparison:
-                display_golive_changes(comparison)
+            st.dataframe(
+                witel_display_df.style.format({
+                    '%': '{:.0f}%',
+                    'On Going_Lop': '{:.0f}',
+                    'On Going_Port': '{:.0f}',
+                    'Go Live_Lop': '{:.0f}',
+                    'Go Live_Port': '{:.0f}',
+                    'Total Lop': '{:.0f}',
+                    'Total Port': '{:.0f}',
+                    'RANK': '{:.0f}'
+                }).apply(
+                    lambda x: ['font-weight: bold' if x.name == 'Grand Total' else '' for _ in x],
+                    axis=1
+                ),
+                use_container_width=True,
+                height=(len(witel_display_df) * 35 + 3)
+            )
             
             # Display DATEL summary
             st.subheader("🏆 Racing per DATEL")
             
             if datel_pivot is not None:
+                # Prepare DATEL display table
                 datel_display_data = {
                     'Witel': datel_pivot.index.get_level_values(0),
                     'Datel': datel_pivot.index.get_level_values(1),
@@ -305,6 +199,7 @@ if view_mode == "Dashboard":
                 
                 datel_display_df = pd.DataFrame(datel_display_data)
                 
+                # Group by WITEL for tabs
                 witels = datel_display_df['Witel'].unique()
                 tabs = st.tabs([f"🏆 {witel}" for witel in witels])
                 
@@ -330,6 +225,7 @@ if view_mode == "Dashboard":
                             hide_index=True
                         )
                         
+                        # Visualization for each WITEL
                         fig = px.bar(
                             witel_data,
                             x='Datel',
@@ -344,10 +240,12 @@ if view_mode == "Dashboard":
                         st.plotly_chart(fig, use_container_width=True)
             
             # Overall visualizations
-            st.subheader("📊 Visualisasi Data")
+            st.subheader("📈 Visualisasi Data")
+            
             col1, col2 = st.columns(2)
             
             with col1:
+                # Total Port by Witel
                 plot_df = witel_display_df[witel_display_df['Witel'] != 'Grand Total'].sort_values('Total Port', ascending=False)
                 fig1 = px.bar(
                     plot_df,
@@ -361,6 +259,7 @@ if view_mode == "Dashboard":
                 st.plotly_chart(fig1, use_container_width=True)
             
             with col2:
+                # Completion percentage
                 fig2 = px.bar(
                     plot_df,
                     x='Witel',
@@ -379,6 +278,7 @@ if view_mode == "Dashboard":
 else:
     st.title("📤 Upload Data Harian")
     
+    # Show last upload info
     last_upload, last_hash = get_last_upload_info()
     if last_upload:
         st.info(f"Terakhir upload: {last_upload}")
@@ -386,6 +286,7 @@ else:
     uploaded_file = st.file_uploader("Upload file Excel harian", type="xlsx")
     
     if uploaded_file:
+        # Validate and process uploaded file
         try:
             current_hash = get_file_hash(uploaded_file.getvalue())
             
@@ -398,16 +299,17 @@ else:
                 if not is_valid:
                     st.error(msg)
                 else:
+                    # Process numeric columns
                     df['Total Port'] = pd.to_numeric(df['Total Port'], errors='coerce')
                     
-                    if os.path.exists(LATEST_FILE):
-                        os.replace(LATEST_FILE, YESTERDAY_FILE)
+                    # Save file and record history
                     save_file(LATEST_FILE, uploaded_file)
                     record_upload_history()
                     
                     st.success("✅ File berhasil diupload dan data dashboard telah diperbarui!")
                     st.balloons()
                     
+                    # Show quick summary
                     st.subheader("📋 Ringkasan Data")
                     cols = st.columns(4)
                     cols[0].metric("Total Projek", len(df))
@@ -415,6 +317,7 @@ else:
                     cols[2].metric("WITEL", df['Witel'].nunique())
                     cols[3].metric("DATEL", df['Datel'].nunique())
                     
+                    # Show sample data
                     st.subheader("🖥️ Preview Data")
                     st.dataframe(df.head(), use_container_width=True)
         
