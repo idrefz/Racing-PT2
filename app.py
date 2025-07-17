@@ -114,31 +114,57 @@ def create_pivot_tables(df):
         witel_pivot['RANK'] = witel_pivot['%'].rank(ascending=False, method='dense')
         witel_pivot.loc['Grand Total', 'RANK'] = None
         
-        return witel_pivot
+        datel_pivot = pd.pivot_table(
+            df,
+            values=['LoP', 'Total Port'],
+            index=['Witel', 'Datel'],
+            columns='Status Proyek',
+            aggfunc='sum',
+            fill_value=0
+        )
+        
+        datel_pivot.columns = ['_'.join(col) if isinstance(col, tuple) else col for col in datel_pivot.columns]
+        
+        if 'Total Port_Go Live' in datel_pivot.columns:
+            datel_pivot['%'] = (datel_pivot['Total Port_Go Live'] / 
+                               (datel_pivot['Total Port_On Going'] + 
+                                datel_pivot['Total Port_Go Live'])).fillna(0) * 100
+        else:
+            datel_pivot['%'] = 0
+            
+        datel_pivot['RANK'] = datel_pivot.groupby('Witel')['Total Port_Go Live'].rank(ascending=False, method='min')
+        
+        return witel_pivot, datel_pivot
     except Exception as e:
         st.error(f"Error creating pivot tables: {str(e)}")
-        return None
+        return None, None
 
-def display_witel_table(witel_display_df):
-    st.dataframe(
-        witel_display_df.style.format({
-            '%': '{:.0f}%',
-            'On Going_Lop': '{:.0f}',
-            'On Going_Port': '{:.0f}',
-            'Go Live_Lop': '{:.0f}',
-            'Go Live_Port': '{:.0f}',
-            'Total Lop': '{:.0f}',
-            'Total Port': '{:.0f}',
-            'GOLIVE H-1 vs HI': '{:.0f}',
-            'RANK': '{:.0f}'
-        }).apply(
-            lambda x: ['font-weight: bold' if x.name == 'Grand Total' else '' for _ in x],
-            axis=1
-        ).apply(
+def display_witel_table(witel_display_df, comparison=None):
+    style = witel_display_df.style.format({
+        '%': '{:.0f}%',
+        'On Going_Lop': '{:.0f}',
+        'On Going_Port': '{:.0f}',
+        'Go Live_Lop': '{:.0f}',
+        'Go Live_Port': '{:.0f}',
+        'Total Lop': '{:.0f}',
+        'Total Port': '{:.0f}',
+        'RANK': '{:.0f}'
+    }).apply(
+        lambda x: ['font-weight: bold' if x.name == 'Grand Total' else '' for _ in x],
+        axis=1
+    )
+    
+    if comparison and 'GOLIVE H-1 vs HI' in witel_display_df.columns:
+        style = style.apply(
             lambda x: ['background-color: #e6ffe6' if (x.name == 'GOLIVE H-1 vs HI' and val > 0) 
-                     else '' for val in x],
+                      else '' for val in x],
             axis=0
-        ),
+        ).format({
+            'GOLIVE H-1 vs HI': '{:.0f}'
+        })
+    
+    st.dataframe(
+        style,
         use_container_width=True,
         height=(len(witel_display_df) * 35 + 3)
     )
@@ -219,7 +245,7 @@ if view_mode == "Dashboard":
         if selected_region != 'All':
             df = df[df['Regional'] == selected_region]
         
-        witel_pivot = create_pivot_tables(df)
+        witel_pivot, datel_pivot = create_pivot_tables(df)
         
         if witel_pivot is not None:
             witel_display_data = {
@@ -235,6 +261,7 @@ if view_mode == "Dashboard":
             }
             
             # Add GOLIVE H-1 vs HI column if comparison data exists
+            comparison = None
             if os.path.exists(YESTERDAY_FILE):
                 df_old = load_excel(YESTERDAY_FILE)
                 if selected_region != 'All':
@@ -253,11 +280,68 @@ if view_mode == "Dashboard":
             
             # Display WITEL summary
             st.subheader("📊 Rekapitulasi per WITEL")
-            display_witel_table(witel_display_df)
+            display_witel_table(witel_display_df, comparison)
             
             # Show GOLIVE H-1 vs HI visualization if comparison data exists
-            if 'comparison' in locals() and comparison:
+            if comparison:
                 display_golive_changes(comparison)
+            
+            # Display DATEL summary
+            st.subheader("🏆 Racing per DATEL")
+            
+            if datel_pivot is not None:
+                datel_display_data = {
+                    'Witel': datel_pivot.index.get_level_values(0),
+                    'Datel': datel_pivot.index.get_level_values(1),
+                    'On Going_Lop': datel_pivot['LoP_On Going'],
+                    'On Going_Port': datel_pivot['Total Port_On Going'],
+                    'Go Live_Lop': datel_pivot['LoP_Go Live'],
+                    'Go Live_Port': datel_pivot['Total Port_Go Live'],
+                    'Total Lop': datel_pivot['LoP_On Going'] + datel_pivot['LoP_Go Live'],
+                    'Total Port': datel_pivot['Total Port_On Going'] + datel_pivot['Total Port_Go Live'],
+                    '%': datel_pivot['%'].round(0),
+                    'RANK': datel_pivot['RANK']
+                }
+                
+                datel_display_df = pd.DataFrame(datel_display_data)
+                
+                witels = datel_display_df['Witel'].unique()
+                tabs = st.tabs([f"🏆 {witel}" for witel in witels])
+                
+                for i, witel in enumerate(witels):
+                    with tabs[i]:
+                        witel_data = datel_display_df[datel_display_df['Witel'] == witel].sort_values('RANK')
+                        
+                        st.dataframe(
+                            witel_data.style.format({
+                                '%': '{:.0f}%',
+                                'On Going_Lop': '{:.0f}',
+                                'On Going_Port': '{:.0f}',
+                                'Go Live_Lop': '{:.0f}',
+                                'Go Live_Port': '{:.0f}',
+                                'Total Lop': '{:.0f}',
+                                'Total Port': '{:.0f}',
+                                'RANK': '{:.0f}'
+                            }).apply(
+                                lambda x: ['background-color: #e6f3ff' if x.RANK == 1 else '' for _ in x],
+                                axis=1
+                            ),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                        
+                        fig = px.bar(
+                            witel_data,
+                            x='Datel',
+                            y=['On Going_Port', 'Go Live_Port'],
+                            title=f'Port Status per DATEL - {witel}',
+                            labels={'value': 'Port Count', 'variable': 'Status'},
+                            color_discrete_map={
+                                'On Going_Port': '#FFA15A',
+                                'Go Live_Port': '#00CC96'
+                            }
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
             
             # Overall visualizations
             st.subheader("📊 Visualisasi Data")
