@@ -330,7 +330,8 @@ if view_mode == "Dashboard":
                 y='Penambahan GOLIVE H-1 vs HI',
                 color='Witel',
                 title='Penambahan Port Go Live vs Hari Sebelumnya',
-                text='Penambahan GOLIVE H-1 vs HI'
+                text='Penambahan GOLIVE H-1 vs HI',
+                color_discrete_sequence=px.colors.qualitative.Pastel
             )
             fig3.update_traces(texttemplate='%{text:,}', textposition='outside')
             st.plotly_chart(fig3, use_container_width=True)
