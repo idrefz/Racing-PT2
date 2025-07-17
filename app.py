@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 import plotly.express as px
 import hashlib
+import shutil
 
 # Configuration
 DATA_FOLDER = "data_daily_uploads"
@@ -25,6 +26,39 @@ def save_file(path, uploaded_file):
 def get_file_hash(file_content):
     return hashlib.md5(file_content).hexdigest()
 
+def compare_with_previous(current_df):
+    """
+    Compare current data with previous upload to calculate delta in Go Live ports
+    Returns a dictionary with Witel as key and delta as value
+    """
+    delta_dict = {}
+    
+    # Check if history file exists and has at least 2 entries
+    if os.path.exists(HISTORY_FILE):
+        history_df = pd.read_csv(HISTORY_FILE)
+        if len(history_df) >= 2:
+            previous_hash = history_df.iloc[-2]['file_hash']
+            previous_file = os.path.join(DATA_FOLDER, f"previous_{previous_hash}.xlsx")
+            
+            # If we have the previous file saved
+            if os.path.exists(previous_file):
+                previous_df = pd.read_excel(previous_file)
+                
+                # Calculate Go Live totals for current and previous data
+                current_golive = current_df[current_df['Status Proyek'] == 'Go Live'].groupby('Witel')['Total Port'].sum()
+                previous_golive = previous_df[previous_df['Status Proyek'] == 'Go Live'].groupby('Witel')['Total Port'].sum()
+                
+                # Calculate delta
+                for witel in current_golive.index:
+                    current_val = current_golive[witel]
+                    previous_val = previous_golive.get(witel, 0)
+                    delta_dict[witel] = current_val - previous_val
+                
+                # Save current file as previous for next comparison
+                shutil.copy(LATEST_FILE, previous_file)
+    
+    return delta_dict
+
 def record_upload_history():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     file_hash = get_file_hash(open(LATEST_FILE, "rb").read()) if os.path.exists(LATEST_FILE) else ""
@@ -32,6 +66,12 @@ def record_upload_history():
     history_df = pd.DataFrame(columns=['timestamp', 'file_hash'])
     if os.path.exists(HISTORY_FILE):
         history_df = pd.read_csv(HISTORY_FILE)
+        # Save current file as previous before updating
+        if not history_df.empty:
+            previous_hash = history_df.iloc[-1]['file_hash']
+            previous_file = os.path.join(DATA_FOLDER, f"previous_{previous_hash}.xlsx")
+            if os.path.exists(LATEST_FILE):
+                shutil.copy(LATEST_FILE, previous_file)
     
     history_df = pd.concat([
         history_df,
@@ -63,6 +103,9 @@ def validate_data(df):
 
 def create_pivot_tables(df):
     try:
+        # Calculate delta from previous upload
+        delta_values = compare_with_previous(df)
+        
         # WITEL level summary
         df['LoP'] = 1  # Each row is one project
         
@@ -88,6 +131,12 @@ def create_pivot_tables(df):
         else:
             witel_pivot['%'] = 0
             
+        # Add delta column
+        witel_pivot['Penambahan GOLIVE H-1 vs HI'] = 0
+        for witel in delta_values:
+            if witel in witel_pivot.index:
+                witel_pivot.at[witel, 'Penambahan GOLIVE H-1 vs HI'] = delta_values[witel]
+        
         witel_pivot['RANK'] = witel_pivot['%'].rank(ascending=False, method='dense')
         witel_pivot.loc['Grand Total', 'RANK'] = None
         
@@ -154,12 +203,13 @@ if view_mode == "Dashboard":
                 'Total Lop': witel_pivot['LoP_Grand Total'],
                 'Total Port': witel_pivot['Total Port_Grand Total'],
                 '%': witel_pivot['%'].round(0),
+                'Penambahan GOLIVE H-1 vs HI': witel_pivot['Penambahan GOLIVE H-1 vs HI'],
                 'RANK': witel_pivot['RANK']
             }
             
             witel_display_df = pd.DataFrame(witel_display_data)
             
-            # Display WITEL summary - FIXED PARENTHESIS ISSUE HERE
+            # Display WITEL summary
             st.subheader("📊 Rekapitulasi per WITEL")
             st.dataframe(
                 witel_display_df.style.format({
@@ -170,6 +220,7 @@ if view_mode == "Dashboard":
                     'Go Live_Port': '{:.0f}',
                     'Total Lop': '{:.0f}',
                     'Total Port': '{:.0f}',
+                    'Penambahan GOLIVE H-1 vs HI': '{:.0f}',
                     'RANK': '{:.0f}'
                 }).apply(
                     lambda x: ['font-weight: bold' if x.name == 'Grand Total' else '' for _ in x],
@@ -177,7 +228,6 @@ if view_mode == "Dashboard":
                 ),
                 use_container_width=True,
                 height=(len(witel_display_df) * 35 + 3)
-            )
             
             # Display DATEL summary
             st.subheader("🏆 Racing per DATEL")
@@ -271,6 +321,19 @@ if view_mode == "Dashboard":
                 fig2.update_traces(texttemplate='%{text:.0f}%', textposition='outside')
                 fig2.update_yaxes(range=[0, 100])
                 st.plotly_chart(fig2, use_container_width=True)
+            
+            # Delta visualization
+            st.subheader("📈 Perubahan Port Go Live (H-1 vs Hari Ini)")
+            fig3 = px.bar(
+                plot_df,
+                x='Witel',
+                y='Penambahan GOLIVE H-1 vs HI',
+                color='Witel',
+                title='Penambahan Port Go Live vs Hari Sebelumnya',
+                text='Penambahan GOLIVE H-1 vs HI'
+            )
+            fig3.update_traces(texttemplate='%{text:,}', textposition='outside')
+            st.plotly_chart(fig3, use_container_width=True)
     else:
         st.warning("Belum ada data yang diupload. Silakan ke halaman Upload Data.")
 
