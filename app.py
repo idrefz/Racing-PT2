@@ -5,7 +5,6 @@ from datetime import datetime
 import plotly.express as px
 import hashlib
 import shutil
-
 # Configuration
 DATA_FOLDER = "data_daily_uploads"
 LATEST_FILE = os.path.join(DATA_FOLDER, "latest.xlsx")
