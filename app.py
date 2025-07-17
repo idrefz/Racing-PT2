@@ -168,7 +168,7 @@ if view_mode == "Dashboard":
                     axis=1
                 ),
                 use_container_width=True,
-                height=(len(witel_display_df) * 35 + 3
+                height=(len(witel_display_df) * 35 + 3)
             )
             
             # Display DATEL summary
