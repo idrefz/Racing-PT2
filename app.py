@@ -159,7 +159,7 @@ if view_mode == "Dashboard":
             
             witel_display_df = pd.DataFrame(witel_display_data)
             
-            # Display WITEL summary
+            # Display WITEL summary - FIXED PARENTHESIS ISSUE HERE
             st.subheader("📊 Rekapitulasi per WITEL")
             st.dataframe(
                 witel_display_df.style.format({
@@ -177,6 +177,7 @@ if view_mode == "Dashboard":
                 ),
                 use_container_width=True,
                 height=(len(witel_display_df) * 35 + 3)
+            )
             
             # Display DATEL summary
             st.subheader("🏆 Racing per DATEL")
