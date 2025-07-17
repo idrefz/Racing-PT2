@@ -78,13 +78,17 @@ def create_pivot_tables(df):
             margins_name='Grand Total'
         )
         
-        if ('Total Port', 'Go Live') in witel_pivot.columns:
-            witel_pivot['%'] = (witel_pivot[('Total Port', 'Go Live')] / 
-                               witel_pivot[('Total Port', 'Grand Total')]).fillna(0) * 100
+        # Flatten multi-index columns
+        witel_pivot.columns = ['_'.join(col) if isinstance(col, tuple) else col for col in witel_pivot.columns]
+        
+        # Calculate percentages
+        if 'Total Port_Go Live' in witel_pivot.columns:
+            witel_pivot['%'] = (witel_pivot['Total Port_Go Live'] / 
+                               witel_pivot['Total Port_Grand Total']).fillna(0) * 100
         else:
             witel_pivot['%'] = 0
             
-        witel_pivot['RANK'] = witel_pivot[('Total Port', 'Grand Total')].rank(ascending=False, method='min')
+        witel_pivot['RANK'] = witel_pivot['Total Port_Grand Total'].rank(ascending=False, method='min')
         witel_pivot.loc['Grand Total', 'RANK'] = None
         
         # DATEL pivot
@@ -97,14 +101,18 @@ def create_pivot_tables(df):
             fill_value=0
         )
         
-        if ('Total Port', 'Go Live') in datel_pivot.columns:
-            datel_pivot['%'] = (datel_pivot[('Total Port', 'Go Live')] / 
-                               (datel_pivot[('Total Port', 'On Going')] + 
-                                datel_pivot[('Total Port', 'Go Live')])).fillna(0) * 100
+        # Flatten multi-index columns
+        datel_pivot.columns = ['_'.join(col) if isinstance(col, tuple) else col for col in datel_pivot.columns]
+        
+        # Calculate percentages
+        if 'Total Port_Go Live' in datel_pivot.columns:
+            datel_pivot['%'] = (datel_pivot['Total Port_Go Live'] / 
+                               (datel_pivot['Total Port_On Going'] + 
+                                datel_pivot['Total Port_Go Live'])).fillna(0) * 100
         else:
             datel_pivot['%'] = 0
             
-        datel_pivot['RANK'] = datel_pivot.groupby('Witel')[('Total Port', 'Go Live')].rank(ascending=False, method='min')
+        datel_pivot['RANK'] = datel_pivot.groupby('Witel')['Total Port_Go Live'].rank(ascending=False, method='min')
         
         return witel_pivot, datel_pivot
     except Exception as e:
@@ -139,12 +147,12 @@ if view_mode == "Dashboard":
             # Prepare WITEL display table
             witel_display_data = {
                 'Witel': witel_pivot.index,
-                'On Going_Lop': witel_pivot[('LoP', 'On Going')],
-                'On Going_Port': witel_pivot[('Total Port', 'On Going')],
-                'Go Live_Lop': witel_pivot[('LoP', 'Go Live')],
-                'Go Live_Port': witel_pivot[('Total Port', 'Go Live')],
-                'Total Lop': witel_pivot[('LoP', 'Grand Total')],
-                'Total Port': witel_pivot[('Total Port', 'Grand Total')],
+                'On Going_Lop': witel_pivot['LoP_On Going'],
+                'On Going_Port': witel_pivot['Total Port_On Going'],
+                'Go Live_Lop': witel_pivot['LoP_Go Live'],
+                'Go Live_Port': witel_pivot['Total Port_Go Live'],
+                'Total Lop': witel_pivot['LoP_Grand Total'],
+                'Total Port': witel_pivot['Total Port_Grand Total'],
                 '%': witel_pivot['%'].round(0),
                 'RANK': witel_pivot['RANK']
             }
@@ -169,7 +177,6 @@ if view_mode == "Dashboard":
                 ),
                 use_container_width=True,
                 height=(len(witel_display_df) * 35 + 3)
-            )
             
             # Display DATEL summary
             st.subheader("🏆 Racing per DATEL")
@@ -179,12 +186,12 @@ if view_mode == "Dashboard":
                 datel_display_data = {
                     'Witel': datel_pivot.index.get_level_values(0),
                     'Datel': datel_pivot.index.get_level_values(1),
-                    'On Going_Lop': datel_pivot[('LoP', 'On Going')],
-                    'On Going_Port': datel_pivot[('Total Port', 'On Going')],
-                    'Go Live_Lop': datel_pivot[('LoP', 'Go Live')],
-                    'Go Live_Port': datel_pivot[('Total Port', 'Go Live')],
-                    'Total Lop': datel_pivot[('LoP', 'On Going')] + datel_pivot[('LoP', 'Go Live')],
-                    'Total Port': datel_pivot[('Total Port', 'On Going')] + datel_pivot[('Total Port', 'Go Live')],
+                    'On Going_Lop': datel_pivot['LoP_On Going'],
+                    'On Going_Port': datel_pivot['Total Port_On Going'],
+                    'Go Live_Lop': datel_pivot['LoP_Go Live'],
+                    'Go Live_Port': datel_pivot['Total Port_Go Live'],
+                    'Total Lop': datel_pivot['LoP_On Going'] + datel_pivot['LoP_Go Live'],
+                    'Total Port': datel_pivot['Total Port_On Going'] + datel_pivot['Total Port_Go Live'],
                     '%': datel_pivot['%'].round(0),
                     'RANK': datel_pivot['RANK']
                 }
