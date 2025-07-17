@@ -157,7 +157,7 @@ def show_dashboard(df_new):
 
     # Pivot-style Table for Project Status
     st.subheader("\U0001F4CA Rekapitulasi Deployment per Witel")
-    
+    try:
     # Create pivot tabletry:
         # Create pivot table with proper column checks
         pivot_columns = ['LoP', 'Total Port']
