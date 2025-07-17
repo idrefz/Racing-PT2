@@ -126,20 +126,7 @@ def compare_data(df_old, df_new):
 
 def show_dashboard(df_new):
     st.title("📊 Dashboard Monitoring Harian")
-    # Check for required columns
-    required_columns = ['Regional', 'Witel', 'Status Proyek', 'LoP', 'Total Port']
-    missing_columns = [col for col in required_columns if col not in df_new.columns]
     
-    if missing_columns:
-        st.error(f"Kolom yang dibutuhkan tidak ditemukan: {', '.join(missing_columns)}")
-        st.info("Pastikan file Excel Anda memiliki kolom: Regional, Witel, Status Proyek, Total Port")
-        return
-
-    # Calculate LoP (count of projects) - each row is 1 project
-    df_new['LoP'] = 1  # Automatically create LoP column
-    
-    # Ensure Total Port is numeric
-    df_new['Total Port'] = pd.to_numeric(df_new['Total Port'], errors='coerce')
     # Regional filter
     regional_list = df_new['Regional'].dropna().unique().tolist()
     selected_regional = st.selectbox("Pilih Regional", ["All"] + sorted(regional_list))
@@ -164,101 +151,71 @@ def show_dashboard(df_new):
 
     # Pivot-style Table for Project Status
     st.subheader("\U0001F4CA Rekapitulasi Deployment per Witel")
-    try:
-    # Create pivot tabletry:
-        # Create pivot table with proper column checks
-        pivot_columns = ['LoP', 'Total Port']
-        pivot_index = 'Witel'
-        pivot_cols = 'Status Proyek'
-        
-        # Verify all pivot columns exist
-        for col in pivot_columns + [pivot_index, pivot_cols]:
-            if col not in df_new.columns:
-                raise KeyError(f"Kolom '{col}' tidak ditemukan dalam data")
-        
-        pivot_table = pd.pivot_table(
-            df_new,
-            values=["LoP", "Total Port"],
-            index="Witel",
-            columns="Status Proyek",
-            aggfunc="sum",
-            fill_value=0,
-            margins=True,
-            margins_name="Grand Total"
-        )
-        
-        # Rest of your pivot table processing...
-# Calculate completion percentage
-        if ('Total Port', 'Go Live') in pivot_table.columns and ('Total Port', 'Grand Total') in pivot_table.columns:  
-    except KeyError as e:
-        st.error(f"Error dalam memproses data: {str(e)}")
-        st.warning("Pastikan file yang diupload memiliki format yang benar dengan kolom yang diperlukan")
-        return
-    except Exception as e:
-        st.error(f"Terjadi kesalahan: {str(e)}")
-        return
+    
+    # Create pivot table
+    pivot_table = pd.pivot_table(
+        df_new,
+        values=["LoP", "Total Port"],
+        index="Witel",
+        columns="Status Proyek",
+        aggfunc="sum",
+        fill_value=0,
+        margins=True,
+        margins_name="Grand Total"
+    )
     
     # Calculate additional metrics
     pivot_table['%'] = (pivot_table[('Total Port', 'Go Live')] / 
                         pivot_table[('Total Port', 'Grand Total')] * 100).round(0)
-    else:
-            st.warning("Tidak dapat menghitung persentase - kolom 'Go Live' tidak ditemukan")
-            pivot_table['%'] = 0
     
-     # Calculate ranking
-        if ('Total Port', 'Grand Total') in pivot_table.columns:
-            witel_only = pivot_table[pivot_table.index != "Grand Total"]
-            ranks = witel_only[('Total Port', 'Grand Total')].rank(ascending=False, method='min')
-            pivot_table['RANK'] = pivot_table.index.map(ranks)
-        else:
-            pivot_table['RANK'] = None
-        
-        # Add GOLIVE additions per Witel if comparison data exists
-        if os.path.exists(YESTERDAY_FILE):
-            df_old = load_excel(YESTERDAY_FILE)
-            result = compare_data(df_old, df_new)
-            golive_port_added = result.get('golive_port_by_witel', pd.Series())
-            pivot_table['Penambahan GOLIVE'] = pivot_table.index.map(
-                lambda x: golive_port_added.get(x, 0)
-            total_added = golive_port_added.sum()
-        else:
-            pivot_table['Penambahan GOLIVE'] = 0
-            total_added = 0
-
-
-            # Create display table
-        display_table = pd.DataFrame({
-            'Witel': pivot_table.index,
-            'On Going_Lop': pivot_table[('LoP', 'On Going')],
-            'On Going_Port': pivot_table[('Total Port', 'On Going')],
-            'Go Live_Lop': pivot_table[('LoP', 'Go Live')],
-            'Go Live_Port': pivot_table[('Total Port', 'Go Live')],
-            'Total Lop': pivot_table[('LoP', 'Grand Total')],
-            'Total Port': pivot_table[('Total Port', 'Grand Total')],
-            '%': pivot_table['%'],
-            'Penambahan GOLIVE H-1 vs HI': pivot_table['Penambahan GOLIVE'],
-            'RANK': pivot_table['RANK']
-        })
-
-        # Format Grand Total row
-        display_table.loc[display_table['Witel'] == 'Grand Total', 'RANK'] = None
-        display_table.loc[display_table['Witel'] == 'Grand Total', 'Penambahan GOLIVE H-1 vs HI'] = total_added
-
-        # Display the table
-        st.dataframe(
-            display_table.style.format({
-                '%': '{:.0f}%',
-                'On Going_Lop': '{:.0f}',
-                'On Going_Port': '{:.0f}',
-                'Go Live_Lop': '{:.0f}',
-                'Go Live_Port': '{:.0f}',
-                'Total Lop': '{:.0f}',
-                'Total Port': '{:.0f}',
-                'Penambahan GOLIVE H-1 vs HI': '{:.0f}',
-                'RANK': '{:.0f}'
-            }),
-            use_container_width=True
+    # Calculate ranking EXCLUDING Grand Total
+    witel_only = pivot_table[pivot_table.index != "Grand Total"]
+    ranks = witel_only[('Total Port', 'Grand Total')].rank(ascending=False, method='min')
+    pivot_table['RANK'] = pivot_table.index.map(ranks)
+    
+    # Add GOLIVE H-1 vs HI per Witel
+    if os.path.exists(YESTERDAY_FILE):
+        df_old = load_excel(YESTERDAY_FILE)
+        result = compare_data(df_old, df_new)
+        golive_port_added = result.get('golive_port_by_witel', pd.Series())
+        pivot_table['Penambahan GOLIVE'] = pivot_table.index.map(
+            lambda x: golive_port_added.get(x, 0)
         )
+    else:
+        pivot_table['Penambahan GOLIVE'] = 0
+
+    # Create display table
+    display_table = pd.DataFrame({
+        'Witel': pivot_table.index,
+        'On Going_Lop': pivot_table[('LoP', 'On Going')],
+        'On Going_Port': pivot_table[('Total Port', 'On Going')],
+        'Go Live_Lop': pivot_table[('LoP', 'Go Live')],
+        'Go Live_Port': pivot_table[('Total Port', 'Go Live')],
+        'Total Lop': pivot_table[('LoP', 'Grand Total')],
+        'Total Port': pivot_table[('Total Port', 'Grand Total')],
+        '%': pivot_table['%'],
+        'Penambahan GOLIVE H-1 vs HI': pivot_table['Penambahan GOLIVE'],
+        'RANK': pivot_table['RANK']
+    })
+
+    # Explicitly set Grand Total rank to empty
+    display_table.loc[display_table['Witel'] == 'Grand Total', 'RANK'] = None
+
+    # Format the table display
+    st.dataframe(
+        display_table.style.format({
+            '%': '{:.0f}%',
+            'On Going_Lop': '{:.0f}',
+            'On Going_Port': '{:.0f}',
+            'Go Live_Lop': '{:.0f}',
+            'Go Live_Port': '{:.0f}',
+            'Total Lop': '{:.0f}',
+            'Total Port': '{:.0f}',
+            'Penambahan GOLIVE H-1 vs HI': '{:.0f}',
+            'RANK': '{:.0f}'
+        }),
+        use_container_width=True
+    )
 
     # Breakdown by Datel with Witel filter
     st.subheader("📊 Breakdown per Datel")
