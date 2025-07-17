@@ -33,29 +33,23 @@ def compare_with_previous(df_curr):
             prev_path = os.path.join(DATA_FOLDER, f"previous_{prev_hash}.xlsx")
             if os.path.exists(prev_path):
                 df_prev = pd.read_excel(prev_path)
-                go_curr = (df_curr[df_curr['Status Proyek']=='Go Live']
-                           .groupby('Witel')['Total Port'].sum())
-                go_prev = (df_prev[df_prev['Status Proyek']=='Go Live']
-                           .groupby('Witel')['Total Port'].sum())
+                go_curr = df_curr[df_curr['Status Proyek']=='Go Live'].groupby('Witel')['Total Port'].sum()
+                go_prev = df_prev[df_prev['Status Proyek']=='Go Live'].groupby('Witel')['Total Port'].sum()
                 for w in go_curr.index:
                     delta[w] = int(go_curr[w] - go_prev.get(w, 0))
     return delta
 
 def record_upload_history():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # last hash
     last_hash = ""
     if os.path.exists(HISTORY_FILE):
         h = pd.read_csv(HISTORY_FILE)
         if not h.empty:
             last_hash = h.iloc[-1]['file_hash']
-    # new hash
     with open(LATEST_FILE,'rb') as f:
         new_hash = get_file_hash(f.read())
-    # archive previous if changed
     if last_hash and last_hash != new_hash:
         shutil.copy(LATEST_FILE, os.path.join(DATA_FOLDER, f"previous_{last_hash}.xlsx"))
-    # append history
     entry = pd.DataFrame([[now, new_hash]], columns=['timestamp','file_hash'])
     if os.path.exists(HISTORY_FILE):
         h = pd.read_csv(HISTORY_FILE)
@@ -86,7 +80,7 @@ def create_pivots(df):
     delta = compare_with_previous(df)
     df['LoP'] = 1
 
-    # --- Witel pivot ---
+    # Witel pivot
     w = pd.pivot_table(
         df,
         values=['LoP','Total Port'],
@@ -97,21 +91,20 @@ def create_pivots(df):
         margins=True,
         margins_name='Grand Total'
     )
-    # flatten columns
     w.columns = ['_'.join(col) for col in w.columns]
-    # percentage
-    w['%'] = (w.get('Total Port_Go Live',0) / w['Total Port_Grand Total']).fillna(0) * 100
+    # compute percentage (optional)
+    w['% Go Live'] = (w.get('Total Port_Go Live',0) / w['Total Port_Grand Total']).fillna(0) * 100
     # delta
-    w['Penambahan GOLIVE H-1 vs HI'] = [delta.get(witel,0) for witel in w.index]
-    # rank overall
-    w['RANK'] = w['%'].rank(ascending=False, method='dense')
-    # ensure integer types
+    w['Δ Go Live'] = [delta.get(witel, 0) for witel in w.index]
+    # rank by total port
+    w['RANK'] = w['Total Port_Grand Total'].rank(ascending=False, method='dense').astype(int)
+    # ensure ints
     for col in w.columns:
-        if col not in ['%']:
+        if col not in ['% Go Live']:
             w[col] = w[col].round(0).astype(int)
-    w.loc['Grand Total','RANK'] = None
+    w.loc['Grand Total', 'RANK'] = None
 
-    # --- Datel pivot ---
+    # Datel pivot
     d = pd.pivot_table(
         df,
         values=['LoP','Total Port'],
@@ -121,25 +114,18 @@ def create_pivots(df):
         fill_value=0
     )
     d.columns = ['_'.join(col) for col in d.columns]
-    # percentage per Datel
-    total_on = d.get('Total Port_On Going',0)
-    total_gl = d.get('Total Port_Go Live',0)
-    d['%'] = (total_gl / (total_on + total_gl)).fillna(0) * 100
-
-    # ---- FIXED: correct ranking per Witel ----
-    if 'Total Port_Go Live' in d.columns:
-        # group the series, then rank
-        d['RANK'] = d['Total Port_Go Live'].groupby(level=0).rank(ascending=False, method='min')
-    else:
-        d['RANK'] = 0
-    # cast to int where appropriate
+    # total port per datel
+    d['Total Port'] = d.get('Total Port_On Going',0) + d.get('Total Port_Go Live',0)
+    d['% Go Live'] = (d.get('Total Port_Go Live',0) / d['Total Port']).fillna(0) * 100
+    # rank per Witel by total port
+    d['RANK'] = d['Total Port'].groupby(level=0).rank(ascending=False, method='min').astype(int)
     for col in d.columns:
-        if col not in ['%']:
+        if col not in ['% Go Live']:
             d[col] = d[col].round(0).astype(int)
 
     return w, d
 
-# --- UI Setup ---
+# UI Setup
 st.set_page_config(page_title="Delta Ticket Harian", layout="wide")
 st.sidebar.title("Navigasi")
 mode = st.sidebar.radio("Pilih Mode", ["Dashboard","Upload Data"])
@@ -153,51 +139,90 @@ if mode == "Dashboard":
         regions = ['All'] + sorted(df['Regional'].dropna().unique())
         sel = st.selectbox("Pilih Regional", regions)
         if sel != 'All':
-            df = df[df['Regional']==sel]
+            df = df[df['Regional'] == sel]
 
-        # Go Live detail
+        # Show Go Live details
         go = df[df['Status Proyek']=='Go Live']
         if not go.empty:
             st.subheader("📋 Detail Proyek Go Live")
-            st.dataframe(go[['Witel','Datel','Nama Proyek','Total Port','Status Proyek']],
-                         use_container_width=True)
+            st.dataframe(
+                go[['Witel','Datel','Nama Proyek','Total Port','Status Proyek']],
+                use_container_width=True
+            )
         else:
             st.info("Tidak ada data Go Live untuk pilihan Regional saat ini.")
 
-        # Pivots & Visualisasi
+        # Pivots & Visualizations
         witel_pivot, datel_pivot = create_pivots(df)
 
-        # Witel summary
+        # Witel summary with styling
         wp = witel_pivot.reset_index().rename(columns={
-            'LoP_On Going':'On Going_Lop','Total Port_On Going':'On Going_Port',
-            'LoP_Go Live':'Go Live_Lop','Total Port_Go Live':'Go Live_Port',
-            'LoP_Grand Total':'Total Lop','Total Port_Grand Total':'Total Port'
+            'LoP_On Going':'OnGoing_LoP',
+            'Total Port_On Going':'OnGoing_Port',
+            'LoP_Go Live':'GoLive_LoP',
+            'Total Port_Go Live':'GoLive_Port',
+            'LoP_Grand Total':'Total_LoP',
+            'Total Port_Grand Total':'Total_Port'
         })
         st.subheader("📊 Rekap Racing PT2 per WITEL")
-        st.dataframe(wp, use_container_width=True)
+        styled_wp = (
+            wp.style
+              .format({
+                  'Total_Port': '{:,.0f}',
+                  '% Go Live': '{:.1f}%',
+                  'OnGoing_LoP':'{:,.0f}',
+                  'OnGoing_Port':'{:,.0f}',
+                  'GoLive_LoP':'{:,.0f}',
+                  'GoLive_Port':'{:,.0f}',
+                  'Total_LoP':'{:,.0f}',
+                  'Δ Go Live':'{:,.0f}',
+                  'RANK':'{:d}'
+              })
+              .background_gradient(subset=['Total_Port','OnGoing_Port','GoLive_Port'], cmap='Blues')
+              .apply(lambda row: ['font-weight: bold; background-color: #fffae6' 
+                                  if row.name == wp.index[-1] else '' 
+                                  for _ in row], axis=1)
+        )
+        st.dataframe(styled_wp, use_container_width=True, height=400)
 
-        # Datel per Witel
+        # Datel per Witel with styling
         dp = datel_pivot.reset_index().rename(columns={
-            'LoP_On Going':'On Going_Lop','Total Port_On Going':'On Going_Port',
-            'LoP_Go Live':'Go Live_Lop','Total Port_Go Live':'Go Live_Port'
+            'LoP_On Going':'OnGoing_LoP',
+            'Total Port_On Going':'OnGoing_Port',
+            'LoP_Go Live':'GoLive_LoP',
+            'Total Port_Go Live':'GoLive_Port'
         })
-        # pastikan kolom ada
-        for c in ['On Going_Lop','Go Live_Lop','On Going_Port','Go Live_Port']:
+        # ensure columns exist
+        for c in ['OnGoing_LoP','GoLive_LoP','OnGoing_Port','GoLive_Port']:
             if c not in dp.columns:
                 dp[c] = 0
-        dp['Total Lop']  = dp['On Going_Lop'] + dp['Go Live_Lop']
-        dp['Total Port'] = dp['On Going_Port'] + dp['Go Live_Port']
+        dp['Total_Port'] = dp['OnGoing_Port'] + dp['GoLive_Port']
 
+        st.subheader("🏆 Racing per DATEL")
         witels = dp['Witel'].unique()
         tabs = st.tabs([f"🏆 {w}" for w in witels])
         for i, w in enumerate(witels):
             with tabs[i]:
                 sub = dp[dp['Witel']==w].sort_values('RANK')
-                st.dataframe(sub, use_container_width=True)
+                styled_dp = (
+                    sub.style
+                       .format({
+                           'Total_Port':'{:,.0f}',
+                           '% Go Live':'{:.1f}%',
+                           'OnGoing_LoP':'{:,.0f}',
+                           'OnGoing_Port':'{:,.0f}',
+                           'GoLive_LoP':'{:,.0f}',
+                           'GoLive_Port':'{:,.0f}',
+                           'RANK':'{:d}'
+                       })
+                       .background_gradient(subset=['Total_Port'], cmap='Greens')
+                       .applymap(lambda v: 'background-color: #e6f3ff' if isinstance(v, (int,float)) and v == 1 else '', subset=['RANK'])
+                )
+                st.dataframe(styled_dp, use_container_width=True, height=300)
                 fig = px.bar(
                     sub,
                     x='Datel',
-                    y=['On Going_Port','Go Live_Port'],
+                    y=['OnGoing_Port','GoLive_Port'],
                     title=f'Port Status per DATEL - {w}',
                     labels={'value':'Port Count','variable':'Status'}
                 )
@@ -205,27 +230,27 @@ if mode == "Dashboard":
 
         # Overall charts
         st.subheader("📈 Visualisasi Data")
-        plot = wp[wp['Witel']!='Grand Total'].sort_values('Total Port', ascending=False)
+        plot = wp[wp['Witel']!='Grand Total'].sort_values('Total_Port', ascending=False)
         c1, c2 = st.columns(2)
         with c1:
-            f1 = px.bar(plot, x='Witel', y='Total Port', text='Total Port')
-            f1.update_traces(textposition='outside')
-            st.plotly_chart(f1, use_container_width=True)
+            fig1 = px.bar(plot, x='Witel', y='Total_Port', text='Total_Port')
+            fig1.update_traces(textposition='outside')
+            st.plotly_chart(fig1, use_container_width=True)
         with c2:
-            f2 = px.bar(plot, x='Witel', y='%', text='%')
-            f2.update_traces(textposition='outside')
-            f2.update_yaxes(range=[0,100])
-            st.plotly_chart(f2, use_container_width=True)
+            fig2 = px.bar(plot, x='Witel', y='% Go Live', text='% Go Live')
+            fig2.update_traces(textposition='outside')
+            fig2.update_yaxes(range=[0,100])
+            st.plotly_chart(fig2, use_container_width=True)
 
         st.subheader("📈 Perubahan Port Go Live (H-1 vs Hari Ini)")
-        f3 = px.bar(plot, x='Witel', y='Penambahan GOLIVE H-1 vs HI', text='Penambahan GOLIVE H-1 vs HI')
-        f3.update_traces(textposition='outside')
-        st.plotly_chart(f3, use_container_width=True)
+        fig3 = px.bar(plot, x='Witel', y='Δ Go Live', text='Δ Go Live')
+        fig3.update_traces(textposition='outside')
+        st.plotly_chart(fig3, use_container_width=True)
 
     else:
         st.warning("Belum ada data yang diupload. Silakan ke halaman Upload Data.")
 
-else:  # Upload Data View
+else:
     st.title("📤 Upload Data Harian")
     last_ts, last_h = get_last_upload_info()
     if last_ts:
@@ -248,14 +273,14 @@ else:  # Upload Data View
                     st.success("✅ File berhasil diupload dan dashboard diperbarui!")
                     st.balloons()
 
-                    # Tabel Go Live pasca-upload
+                    # Show Go Live details after upload
                     go2 = df_new[df_new['Status Proyek']=='Go Live']
                     if not go2.empty:
                         st.subheader("📋 Detail Proyek Go Live (Upload Terbaru)")
                         st.dataframe(go2[['Witel','Datel','Nama Proyek','Total Port','Status Proyek']],
                                      use_container_width=True)
 
-                    # Ringkasan cepat
+                    # Quick summary metrics
                     st.subheader("📋 Ringkasan Data")
                     cols = st.columns(4)
                     cols[0].metric("Total Projek", len(df_new))
